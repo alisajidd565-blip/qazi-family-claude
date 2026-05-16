@@ -356,21 +356,20 @@ function App(){
           refB64=await new Promise(res=>{const rd=new FileReader();rd.onload=e=>res(e.target.result.split(",")[1]);rd.readAsDataURL(rb);});
         }catch(_){}
       }
-      const result=await callGroqJudge(b64,rawFile.type,chall.prompt,refB64,refMime);
-      const row={
-        cousin_id:uploadFor,
-        challenge_id:chall.id||null,
-        challenge_prompt:chall.prompt,
-        image_url:imageUrl,
-        creativity_score:result.creativity_score,
-        adherence_score:result.adherence_score,
-        artistic_quality_score:result.artistic_quality_score,
-        overall_score:result.overall_score,
-        review:result.review,
-        improvements:result.improvements,
-        roast:result.roast,
-      };
-      const saved=await dbInsertSubmission(row);
+      const result=await callGroqJudge(b64,rawFile.type,chall.prompt,refB64,refMime);const parse = v => parseFloat(parseFloat(v).toFixed(1));
+const parse = v => parseFloat(parseFloat(v).toFixed(1));
+const row={
+  cousin_id:uploadFor,
+  challenge_id:chall.id||null,
+  challenge_prompt:chall.prompt,
+  image_url:imageUrl,
+  visual_score:parse(result.visual_score),
+  task_score:parse(result.task_score),
+  overall_score:parse(result.overall_score),
+  review:result.review,
+  improvements:result.improvements,
+  roast:result.roast,
+};      const saved=await dbInsertSubmission(row);
       setViewSub(saved);
       closeUpload();
       toast("Judged! Score: "+result.overall_score+"/10 ⚡");
