@@ -26,6 +26,8 @@ input::placeholder,textarea::placeholder{color:#64748b!important}
 .tab-btn.active{background:rgba(0,229,255,0.12);border-color:rgba(0,229,255,0.4);color:#00e5ff}
 .up-zone{border:2px dashed rgba(0,229,255,0.3);border-radius:12px;padding:44px;text-align:center;cursor:pointer;transition:border-color .2s}
 .up-zone:hover{border-color:rgba(0,229,255,0.6)}
+img[loading="lazy"]{content-visibility:auto}
+.anim-float{will-change:transform}
 .spinner{width:20px;height:20px;border:2px solid rgba(0,229,255,0.2);border-top-color:#00e5ff;border-radius:50%;animation:spin .7s linear infinite;display:inline-block;vertical-align:middle;margin-right:8px}
 </style>
 </head>
@@ -69,7 +71,7 @@ const COUSINS = [
 const DEFAULT_CHALL = {id:0,prompt:"Create an image of a footballer playing with a football made of water while playing inside the sea.",difficulty:"Hard",created_at:new Date().toISOString()};
 const C = {cyan:"#00e5ff",purple:"#a855f7",gold:"#f59e0b",green:"#22c55e",red:"#ef4444",muted:"#64748b",bg:"#060a14"};
 const OF = "'Orbitron',monospace";
-const CARD = {background:"rgba(15,23,42,0.88)",border:"1px solid rgba(0,229,255,0.2)",borderRadius:"16px",backdropFilter:"blur(10px)"};
+const CARD = {background:"rgba(15,23,42,0.96)",border:"1px solid rgba(0,229,255,0.2)",borderRadius:"16px",contain:"layout style"};
 const MOD = {position:"fixed",inset:0,background:"rgba(0,0,0,0.88)",backdropFilter:"blur(6px)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:"16px",overflowY:"auto"};
 const MBX = {background:"rgba(8,14,26,0.99)",border:"1px solid rgba(0,229,255,0.3)",borderRadius:"20px",padding:"28px",maxWidth:"580px",width:"100%",maxHeight:"92vh",overflowY:"auto",boxShadow:"0 0 50px rgba(0,229,255,0.15)"};
 const PBTN = {background:"linear-gradient(135deg,rgba(0,229,255,0.2),rgba(168,85,247,0.2))",border:"1px solid rgba(0,229,255,0.5)",color:"#00e5ff",borderRadius:"10px",padding:"11px 22px",cursor:"pointer",fontSize:"14px",fontWeight:"700",fontFamily:OF,letterSpacing:"1px"};
@@ -137,19 +139,43 @@ async function uploadToCloudinary(file){
 }
 
 // ===== GROQ AI JUDGE =====
-async function callGroqJudge(base64Data,mimeType,challengePrompt){
-  const prompt=`You are an AI judge for the "AI Enthusiasts - Qazi Family" competition.
+async function callGroqJudge(base64Data,mimeType,challengePrompt,refB64,refMime){
+  const hasRef=refB64&&refMime;
+  const refNote=hasRef?`
+A REFERENCE IMAGE has been provided above (first image). It is purely a rough visual mood-board uploaded by the organiser — a loose atmospheric hint only.
+CRITICAL: Do NOT score or penalise based on similarity/deviation from the reference image. The reference carries ZERO weight in your scoring. It is shown only so you understand the general theme, nothing more.`:"";
 
-Challenge: "${challengePrompt}"
+  const prompt=`You are a fair and encouraging AI judge for the "AI Enthusiasts - Qazi Family" image competition.
+${refNote}
+TASK the participant was given: "${challengePrompt}"
 
-Analyze this AI-generated image vs the challenge prompt. Reply ONLY with valid JSON:
-{"creativity_score":<1-10>,"adherence_score":<1-10>,"artistic_quality_score":<1-10>,"overall_score":<1-10>,"review":"<2-3 sentence review>","improvements":"<2-3 improvement tips>","roast":"<funny roast>"}
+You are now looking at the PARTICIPANT'S submitted image${hasRef?" (second image)":""}.
 
-overall_score=average of 3 scores. JSON only.`;
+JUDGING CRITERIA — score each out of 10:
+1. creativity_score  — How imaginative, original, and inventive is the image?
+2. adherence_score   — How well does the image address the TASK TEXT above? Judge against the written task only, not against the reference image.
+3. artistic_quality_score — Visual polish: composition, colour, detail, aesthetics.
+
+SCORING RULES:
+- Base your scores ENTIRELY on the participant's image quality and how it fits the written task.
+- The reference image (if any) has NO bearing on scores whatsoever — ignore it for scoring.
+- Be fair, generous, and constructive.
+- overall_score = (creativity_score × 0.4) + (artistic_quality_score × 0.45) + (adherence_score × 0.15). Round to 1 decimal.
+
+Reply ONLY with valid JSON, no extra text:
+{"creativity_score":<1-10>,"adherence_score":<1-10>,"artistic_quality_score":<1-10>,"overall_score":<1-10>,"review":"<2-3 sentence review of the participant image>","improvements":"<2-3 specific improvement tips>","roast":"<short funny roast>"}`;
+
+  const contentArr=[];
+  if(hasRef){
+    contentArr.push({type:"image_url",image_url:{url:"data:"+refMime+";base64,"+refB64}});
+  }
+  contentArr.push({type:"image_url",image_url:{url:"data:"+mimeType+";base64,"+base64Data}});
+  contentArr.push({type:"text",text:prompt});
+
   const resp=await fetch("https://api.groq.com/openai/v1/chat/completions",{
     method:"POST",
     headers:{"Authorization":"Bearer "+CFG.groqKey,"Content-Type":"application/json"},
-    body:JSON.stringify({model:"meta-llama/llama-4-scout-17b-16e-instruct",messages:[{role:"user",content:[{type:"image_url",image_url:{url:"data:"+mimeType+";base64,"+base64Data}},{type:"text",text:prompt}]}],max_tokens:800,temperature:0.7})
+    body:JSON.stringify({model:"meta-llama/llama-4-scout-17b-16e-instruct",messages:[{role:"user",content:contentArr}],max_tokens:900,temperature:0.7})
   });
   if(!resp.ok){const e=await resp.json();throw new Error(e.error?.message||"Groq error "+resp.status);}
   const data=await resp.json();
@@ -158,7 +184,7 @@ overall_score=average of 3 scores. JSON only.`;
 </script>
 
 <script type="text/babel">
-const{useState,useEffect,useRef,useMemo,useCallback,memo}=React;
+const{useState,useEffect,useRef,useMemo,useCallback,memo,startTransition,useDeferredValue}=React;
 
 // ===== COUSIN CARD (memoized) =====
 const CousinCard=memo(function CousinCard({cousin,rank,subs,adminMode,onGallery,onUpload,onView,customIntro}){
@@ -237,7 +263,10 @@ function App(){
   const[showCE,setSCE]=useState(false);
   const[editIntroId,setEI]=useState(null);
   const[editTxt,setET]=useState("");
+  const[newRefImg,setNRI]=useState(null);
+  const[newRefFile,setNRF]=useState(null);
   const fileRef=useRef(null);
+  const refImgRef=useRef(null);
   const ntRef=useRef(null);
 
   const chall=challenges[challenges.length-1];
@@ -258,13 +287,13 @@ function App(){
     // Real-time subscription
     const ch=sb.channel("qazi_rt")
       .on("postgres_changes",{event:"*",schema:"public",table:"qazi_submissions"},()=>{
-        dbFetchSubmissions().then(setSubs).catch(()=>{});
+        clearTimeout(window.__rtDebounce);window.__rtDebounce=setTimeout(()=>dbFetchSubmissions().then(d=>startTransition(()=>setSubs(d))).catch(()=>{}),400);
       })
       .on("postgres_changes",{event:"*",schema:"public",table:"qazi_challenges"},()=>{
-        dbFetchChallenges().then(d=>{if(d.length>0)setChalls(d);}).catch(()=>{});
+        clearTimeout(window.__rtCDebounce);window.__rtCDebounce=setTimeout(()=>dbFetchChallenges().then(d=>startTransition(()=>{if(d.length>0)setChalls(d);})).catch(()=>{}),400);
       })
       .on("postgres_changes",{event:"*",schema:"public",table:"qazi_intros"},()=>{
-        dbFetchIntros().then(setIntros).catch(()=>{});
+        clearTimeout(window.__rtIDebounce);window.__rtIDebounce=setTimeout(()=>dbFetchIntros().then(d=>startTransition(()=>setIntros(d))).catch(()=>{}),400);
       })
       .subscribe();
 
@@ -279,6 +308,7 @@ function App(){
       return{...c,total,count:cs.length,avg:cs.length?+(total/cs.length).toFixed(1):0};
     }).sort((a,b)=>b.total-a.total)
   ,[subs]);
+  const deferredLb=useDeferredValue(lb);
 
   const subsByCousin=useMemo(()=>{
     const m={};COUSINS.forEach(c=>{m[c.id]=subs.filter(s=>s.cousin_id===c.id);});return m;
@@ -287,7 +317,7 @@ function App(){
   const totalPts=useMemo(()=>subs.reduce((a,s)=>a+(s.overall_score||0),0),[subs]);
   const bestSub=useMemo(()=>subs.length?subs.reduce((b,s)=>(s.overall_score||0)>(b.overall_score||0)?s:b,subs[0]):null,[subs]);
   const funniest=useMemo(()=>subs.filter(s=>s.roast).sort((a,b)=>b.roast.length-a.roast.length)[0]||null,[subs]);
-  const mostActive=useMemo(()=>[...lb].sort((a,b)=>b.count-a.count)[0],[lb]);
+  const mostActive=useMemo(()=>[...deferredLb].sort((a,b)=>b.count-a.count)[0],[lb]);
 
   const toast=useCallback((msg,type="ok")=>{
     setNotif({msg,type});clearTimeout(ntRef.current);
@@ -316,7 +346,17 @@ function App(){
     setJudging(true);setUploading(false);
     try{
       const b64=preview.split(",")[1];
-      const result=await callGroqJudge(b64,rawFile.type,chall.prompt);
+      // Fetch reference image as base64 if the challenge has one
+      let refB64=null,refMime=null;
+      if(chall.reference_image_url){
+        try{
+          const rr=await fetch(chall.reference_image_url);
+          const rb=await rr.blob();
+          refMime=rb.type||"image/jpeg";
+          refB64=await new Promise(res=>{const rd=new FileReader();rd.onload=e=>res(e.target.result.split(",")[1]);rd.readAsDataURL(rb);});
+        }catch(_){}
+      }
+      const result=await callGroqJudge(b64,rawFile.type,chall.prompt,refB64,refMime);
       const row={
         cousin_id:uploadFor,
         challenge_id:chall.id||null,
@@ -346,10 +386,16 @@ function App(){
   const addChallenge=useCallback(async()=>{
     if(!newPrompt.trim())return;
     try{
-      const c=await dbInsertChallenge({prompt:newPrompt.trim(),difficulty:newDiff});
-      setNP("");setND("Medium");setSCE(false);toast("New challenge live! 🎯");
+      let refUrl=null;
+      if(newRefFile){
+        setStatus("📤 Uploading reference image...");
+        refUrl=await uploadToCloudinary(newRefFile);
+        setStatus("");
+      }
+      await dbInsertChallenge({prompt:newPrompt.trim(),difficulty:newDiff,reference_image_url:refUrl||null});
+      setNP("");setND("Medium");setNRI(null);setNRF(null);setSCE(false);toast("New challenge live! 🎯");
     }catch(e){toast("Error: "+e.message,"err");}
-  },[newPrompt,newDiff,toast]);
+  },[newPrompt,newDiff,newRefFile,toast]);
 
   const saveIntro=useCallback(async()=>{
     if(!editIntroId)return;
@@ -394,7 +440,7 @@ function App(){
     </div>
     <div style={{display:"flex",gap:"6px",alignItems:"center"}}>
       {[["home","🏠 HOME"],["leaderboard","🏆 RANKS"],["hof","⭐ HOF"]].map(([t,lbl])=>(
-        <button key={t} className={"tab-btn"+(tab===t?" active":"")} onClick={()=>setTab(t)}>{lbl}</button>
+        <button key={t} className={"tab-btn"+(tab===t?" active":"")} onClick={()=>startTransition(()=>setTab(t))}>{lbl}</button>
       ))}
       <button onClick={()=>adminMode?setAdmin(false):setShowLogin(true)} style={{background:adminMode?"rgba(245,158,11,0.15)":"rgba(168,85,247,0.15)",border:"1px solid "+(adminMode?C.gold:C.purple)+"55",color:adminMode?C.gold:C.purple,borderRadius:"8px",padding:"5px 12px",cursor:"pointer",fontSize:"11px",fontFamily:OF,letterSpacing:"1px"}}>
         {adminMode?"🔓 ADMIN":"🔒 ADMIN"}
@@ -432,7 +478,21 @@ function App(){
             <span style={{background:diffColor(chall.difficulty)+"22",color:diffColor(chall.difficulty),border:"1px solid currentColor",padding:"3px 12px",borderRadius:"20px",fontSize:"11px",fontFamily:OF,letterSpacing:"2px"}}>{(chall.difficulty||"Hard").toUpperCase()}</span>
             <span style={{color:C.muted,fontSize:"11px",padding:"3px 12px",background:"rgba(255,255,255,0.05)",borderRadius:"20px"}}>📅 {new Date(chall.created_at||Date.now()).toLocaleDateString()}</span>
           </div>
-          <p style={{fontSize:"clamp(15px,2.2vw,21px)",color:"#e2e8f0",fontStyle:"italic",lineHeight:"1.8",margin:"0 0 24px",fontWeight:"500"}}>"{chall.prompt}"</p>
+          <p style={{fontSize:"clamp(15px,2.2vw,21px)",color:"#e2e8f0",fontStyle:"italic",lineHeight:"1.8",margin:"0 0 20px",fontWeight:"500"}}>"{chall.prompt}"</p>
+          {chall.reference_image_url&&(
+            <div style={{margin:"0 auto 22px",maxWidth:"320px"}}>
+              <div style={{fontSize:"10px",color:C.muted,letterSpacing:"2px",marginBottom:"8px",fontFamily:OF,display:"flex",alignItems:"center",justifyContent:"center",gap:"6px"}}>
+                <span style={{color:C.gold}}>🖼️</span> REFERENCE IMAGE
+                <span style={{color:"rgba(100,116,139,0.7)",fontFamily:"'Exo 2',sans-serif",letterSpacing:"0px",fontSize:"9px"}}>(rough inspiration only — not a strict target)</span>
+              </div>
+              <div style={{borderRadius:"10px",overflow:"hidden",border:"1px solid rgba(245,158,11,0.35)",boxShadow:"0 0 20px rgba(245,158,11,0.08)",position:"relative"}}>
+                <img src={chall.reference_image_url} alt="Reference" style={{width:"100%",maxHeight:"200px",objectFit:"cover",display:"block"}} loading="lazy"/>
+                <div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(0,0,0,0.75))",padding:"10px 12px",fontSize:"10px",color:"rgba(245,158,11,0.85)",fontStyle:"italic",textAlign:"left"}}>
+                  💡 Use this as a loose visual mood-board only
+                </div>
+              </div>
+            </div>
+          )}
           {adminMode&&<button className="pb" onClick={()=>setSCE(true)} style={PBTN}>+ New Challenge</button>}
         </div>
       </section>
@@ -441,7 +501,7 @@ function App(){
         <h2 style={{fontFamily:OF,color:C.cyan,textShadow:"0 0 16px "+C.cyan,fontSize:"20px",textAlign:"center",marginBottom:"28px",letterSpacing:"3px"}}>⚔️ THE COMPETITORS</h2>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(310px,1fr))",gap:"20px"}}>
           {COUSINS.map(cousin=>(
-            <CousinCard key={cousin.id} cousin={cousin} rank={lb.findIndex(l=>l.id===cousin.id)+1} subs={subsByCousin[cousin.id]} adminMode={adminMode} onGallery={setGallery} onUpload={handleUpload} onView={setViewSub} customIntro={intros[cousin.id]}/>
+            <CousinCard key={cousin.id} cousin={cousin} rank={deferredLb.findIndex(l=>l.id===cousin.id)+1} subs={subsByCousin[cousin.id]} adminMode={adminMode} onGallery={setGallery} onUpload={handleUpload} onView={setViewSub} customIntro={intros[cousin.id]}/>
           ))}
         </div>
       </section>
@@ -450,7 +510,7 @@ function App(){
     {tab==="leaderboard"&&<div style={{padding:"36px 20px 80px",maxWidth:"820px",margin:"0 auto"}}>
       <h2 style={{fontFamily:OF,color:C.cyan,textShadow:"0 0 16px "+C.cyan,fontSize:"24px",textAlign:"center",marginBottom:"32px",letterSpacing:"4px"}}>🏆 LEADERBOARD</h2>
       <div style={{display:"flex",justifyContent:"center",gap:"14px",marginBottom:"40px",alignItems:"flex-end",flexWrap:"wrap"}}>
-        {lb.slice(0,3).map((c,i)=>{
+        {deferredLb.slice(0,3).map((c,i)=>{
           const ph=["175px","215px","150px"],po=[1,0,2],md2=["🥈","🥇","🥉"],mc=[C.muted,C.gold,"#cd7f32"];
           return(
             <div key={c.id} style={{order:po[i],textAlign:"center",minWidth:"125px"}}>
@@ -467,7 +527,7 @@ function App(){
         })}
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:"9px"}}>
-        {lb.map((c,i)=>(
+        {deferredLb.map((c,i)=>(
           <div key={c.id} style={{...CARD,padding:"14px 18px",display:"flex",alignItems:"center",gap:"14px",border:"1px solid "+(i<3?c.color+"44":"rgba(0,229,255,0.15)")}}>
             <div style={{width:"36px",height:"36px",borderRadius:"50%",background:i===0?"rgba(245,158,11,0.15)":i===1?"rgba(100,116,139,0.15)":"rgba(255,255,255,0.05)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:OF,fontSize:i<3?"16px":"12px",color:i===0?C.gold:i===1?C.muted:i===2?"#cd7f32":C.muted,flexShrink:0}}>{medal(i+1)}</div>
             <img src={c.img} alt={c.name} loading="lazy" style={{width:"40px",height:"40px",borderRadius:"50%",objectFit:"cover",border:"2px solid "+c.color+"66",flexShrink:0}}/>
@@ -539,13 +599,21 @@ function App(){
   {uploadFor&&<div style={MOD} onClick={e=>e.target===e.currentTarget&&closeUpload()}>
     <div style={MBX} className="modal-anim">
       {(()=>{const c=getCousin(uploadFor);return(<>
-        <div style={{display:"flex",alignItems:"center",gap:"14px",marginBottom:"20px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:"14px",marginBottom:"16px"}}>
           <img src={c?.img} alt="" loading="lazy" style={{width:"50px",height:"50px",borderRadius:"50%",objectFit:"cover",border:"2px solid "+c?.color+"66"}}/>
           <div>
             <h3 style={{fontFamily:OF,color:c?.color,margin:0,fontSize:"15px"}}>Upload for {c?.name}</h3>
-            <p style={{color:C.muted,fontSize:"11px",margin:"4px 0 0"}}>"{chall.prompt.slice(0,60)}..."</p>
+            <p style={{color:C.muted,fontSize:"11px",margin:"4px 0 0"}}>"{chall.prompt.slice(0,70)}..."</p>
           </div>
         </div>
+        {chall.reference_image_url&&(
+          <div style={{marginBottom:"16px",borderRadius:"10px",overflow:"hidden",border:"1px solid rgba(245,158,11,0.3)",background:"rgba(245,158,11,0.04)"}}>
+            <div style={{padding:"6px 12px",fontSize:"9px",color:C.gold,fontFamily:OF,letterSpacing:"2px",display:"flex",alignItems:"center",gap:"5px",borderBottom:"1px solid rgba(245,158,11,0.2)"}}>
+              🖼️ REFERENCE IMAGE <span style={{color:C.muted,fontFamily:"'Exo 2',sans-serif",letterSpacing:"0",fontSize:"9px",fontWeight:"400",textTransform:"none"}}>— rough inspiration only, NOT a strict target</span>
+            </div>
+            <img src={chall.reference_image_url} alt="Reference" style={{width:"100%",maxHeight:"140px",objectFit:"cover",display:"block"}} loading="lazy"/>
+          </div>
+        )}
         {!preview?(<div className="up-zone" onClick={()=>fileRef.current?.click()} style={{marginBottom:"16px"}}>
           <div style={{fontSize:"40px",marginBottom:"8px"}}>📤</div>
           <div style={{color:C.cyan,fontFamily:OF,fontSize:"12px",marginBottom:"5px"}}>CLICK TO UPLOAD IMAGE</div>
@@ -631,8 +699,8 @@ function App(){
     </div>
   </div>}
 
-  {showCE&&<div style={MOD} onClick={e=>e.target===e.currentTarget&&setSCE(false)}>
-    <div style={{...MBX,maxWidth:"480px"}} className="modal-anim">
+  {showCE&&<div style={MOD} onClick={e=>e.target===e.currentTarget&&(setSCE(false),setNRI(null),setNRF(null))}>
+    <div style={{...MBX,maxWidth:"500px"}} className="modal-anim">
       <h3 style={{fontFamily:OF,color:C.cyan,textShadow:"0 0 12px "+C.cyan,textAlign:"center",marginBottom:"20px",fontSize:"16px",letterSpacing:"2px"}}>➕ NEW CHALLENGE</h3>
       <textarea placeholder="Enter challenge prompt..." value={newPrompt} onChange={e=>setNP(e.target.value)} style={{...INP,minHeight:"100px",resize:"vertical",marginBottom:"14px"}}/>
       <div style={{marginBottom:"16px"}}>
@@ -643,9 +711,32 @@ function App(){
           ))}
         </div>
       </div>
+      <div style={{marginBottom:"16px"}}>
+        <div style={{fontSize:"11px",color:C.muted,marginBottom:"7px",display:"flex",alignItems:"center",gap:"6px"}}>
+          <span style={{color:C.gold}}>🖼️</span> REFERENCE IMAGE <span style={{color:"rgba(100,116,139,0.6)",fontFamily:"'Exo 2',sans-serif",letterSpacing:"0",fontSize:"10px",fontWeight:"400"}}>(optional — rough inspiration only)</span>
+        </div>
+        {!newRefImg?(
+          <div onClick={()=>refImgRef.current?.click()} style={{border:"1px dashed rgba(245,158,11,0.35)",borderRadius:"10px",padding:"18px",textAlign:"center",cursor:"pointer",background:"rgba(245,158,11,0.04)",transition:"border-color .2s"}}
+            onMouseEnter={e=>e.currentTarget.style.borderColor="rgba(245,158,11,0.65)"}
+            onMouseLeave={e=>e.currentTarget.style.borderColor="rgba(245,158,11,0.35)"}>
+            <div style={{fontSize:"26px",marginBottom:"5px"}}>🖼️</div>
+            <div style={{color:C.gold,fontSize:"11px",fontFamily:OF,letterSpacing:"1px"}}>UPLOAD REFERENCE IMAGE</div>
+            <div style={{color:C.muted,fontSize:"10px",marginTop:"3px"}}>Optional • PNG, JPG, WEBP</div>
+            <input ref={refImgRef} type="file" accept="image/*" onChange={e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{setNRI(ev.target.result);setNRF(f);};r.readAsDataURL(f);e.target.value="";}} style={{display:"none"}}/>
+          </div>
+        ):(
+          <div style={{position:"relative",borderRadius:"10px",overflow:"hidden",border:"1px solid rgba(245,158,11,0.4)"}}>
+            <img src={newRefImg} alt="Reference preview" style={{width:"100%",maxHeight:"160px",objectFit:"cover",display:"block"}}/>
+            <button onClick={()=>{setNRI(null);setNRF(null);}} style={{position:"absolute",top:"7px",right:"7px",background:"rgba(0,0,0,0.75)",border:"1px solid rgba(239,68,68,0.6)",color:C.red,borderRadius:"6px",padding:"3px 9px",cursor:"pointer",fontSize:"11px"}}>✕ Remove</button>
+            <div style={{padding:"7px 10px",background:"rgba(0,0,0,0.6)",fontSize:"10px",color:"rgba(245,158,11,0.8)",fontStyle:"italic"}}>
+              🖼️ {newRefFile?.name} — will be shown as a loose visual hint to participants
+            </div>
+          </div>
+        )}
+      </div>
       <div style={{display:"flex",gap:"10px"}}>
         <button className="pb" onClick={addChallenge} style={{...PBTN,flex:1}}>ADD CHALLENGE</button>
-        <button onClick={()=>setSCE(false)} style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.15)",color:"#94a3b8",borderRadius:"8px",padding:"11px 16px",cursor:"pointer"}}>CANCEL</button>
+        <button onClick={()=>{setSCE(false);setNRI(null);setNRF(null);}} style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.15)",color:"#94a3b8",borderRadius:"8px",padding:"11px 16px",cursor:"pointer"}}>CANCEL</button>
       </div>
     </div>
   </div>}
