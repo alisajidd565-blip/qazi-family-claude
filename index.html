@@ -312,10 +312,14 @@ function App(){
       return{...c,total,count:cs.length,avg:cs.length?+(total/cs.length).toFixed(1):0};
     }).sort((a,b)=>b.total-a.total)
   ,[subs]);
-   const subsByCousin=useMemo(()=>{
-    const m={};COUSINS.forEach(c=>{m[c.id]=subs.filter(s=>s.cousin_id===c.id);});return m;
-  },[subs]);
+  
+     const subsByCousin = useMemo(() => {
+    const m = {};
+    COUSINS.forEach(c => { m[c.id] = subs.filter(s => s.cousin_id === c.id); });
+    return m;
+  }, [subs]);
 
+  // FIXED LEADERBOARD
   const lb = useMemo(() => {
     return COUSINS.map(cousin => {
       const subsList = subsByCousin[cousin.id] || [];
@@ -329,14 +333,27 @@ function App(){
     }).sort((a, b) => b.total - a.total);
   }, [subsByCousin]);
 
-  const deferredLb=useDeferredValue(lb);
+  const deferredLb = useDeferredValue(lb);
 
-  const bestSub=useMemo(()=>subs.length?subs.reduce((b,s)=>(s.overall_score||0)>(b.overall_score||0)?s:b,subs[0]):null,[subs]);
-  const funniest=useMemo(()=>subs.filter(s=>s.roast).sort((a,b)=>b.roast.length-a.roast.length)[0]||null,[subs]);
-  const mostActive=useMemo(()=>[...lb].sort((a,b)=>b.count-a.count)[0],[lb]);
+  const bestSub = useMemo(() => 
+    subs.length ? subs.reduce((b, s) => (s.overall_score || 0) > (b.overall_score || 0) ? s : b, subs[0]) : null, 
+  [subs]);
 
-  const toast=useCallback((msg,type="ok")=>{
-    setNotif({msg,type});
+  const funniest = useMemo(() => 
+    subs.filter(s => s.roast).sort((a, b) => b.roast.length - a.roast.length)[0] || null, 
+  [subs]);
+
+  const mostActive = useMemo(() => 
+    [...lb].sort((a, b) => b.count - a.count)[0], 
+  [lb]);
+
+  const toast = useCallback((msg, type = "ok") => {
+    setNotif({ msg, type });
+    clearTimeout(ntRef.current);
+    ntRef.current = setTimeout(() => setNotif(null), 4000);
+  }, []);
+  
+  setNotif({msg,type});
     clearTimeout(ntRef.current);
     ntRef.current=setTimeout(()=>setNotif(null),4000);
   },[]);
