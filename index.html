@@ -305,49 +305,29 @@ function App(){
   },[]);
 
   // ===== MEMOIZED COMPUTATIONS =====
-      const subsByCousin = useMemo(() => {
-    const m = {};
-    COUSINS.forEach(c => { m[c.id] = subs.filter(s => s.cousin_id === c.id); });
-    return m;
-  }, [subs]);
+  const lb=useMemo(()=>
+    COUSINS.map(c=>{
+      const cs=subs.filter(s=>s.cousin_id===c.id);
+      const total=cs.reduce((a,s)=>a+(s.overall_score||0),0);
+      return{...c,total,count:cs.length,avg:cs.length?+(total/cs.length).toFixed(1):0};
+    }).sort((a,b)=>b.total-a.total)
+  ,[subs]);
+  const deferredLb=useDeferredValue(lb);
 
-  const lb = useMemo(() => {
-    return COUSINS.map(cousin => {
-      const subsList = subsByCousin[cousin.id] || [];
-      const total = subsList.reduce((sum, s) => sum + Number(s.overall_score || 0), 0);
-      return {
-        ...cousin,
-        total: parseFloat(total.toFixed(1)),
-        count: subsList.length,
-        avg: subsList.length ? (total / subsList.length).toFixed(1) : "0.0"
-      };
-    }).sort((a, b) => b.total - a.total);
-  }, [subsByCousin]);
+  const subsByCousin=useMemo(()=>{
+    const m={};COUSINS.forEach(c=>{m[c.id]=subs.filter(s=>s.cousin_id===c.id);});return m;
+  },[subs]);
 
-  const deferredLb = useDeferredValue(lb);
+  const totalPts=useMemo(()=>subs.reduce((a,s)=>a+(s.overall_score||0),0),[subs]);
+  const bestSub=useMemo(()=>subs.length?subs.reduce((b,s)=>(s.overall_score||0)>(b.overall_score||0)?s:b,subs[0]):null,[subs]);
+  const funniest=useMemo(()=>subs.filter(s=>s.roast).sort((a,b)=>b.roast.length-a.roast.length)[0]||null,[subs]);
+  const mostActive=useMemo(()=>[...deferredLb].sort((a,b)=>b.count-a.count)[0],[lb]);
 
-  const totalPts = useMemo(() => 
-    lb.reduce((a, c) => a + c.total, 0).toFixed(1), 
-  [lb]);
+  const toast=useCallback((msg,type="ok")=>{
+    setNotif({msg,type});clearTimeout(ntRef.current);
+    ntRef.current=setTimeout(()=>setNotif(null),4000);
+  },[]);
 
-  const bestSub = useMemo(() => 
-    subs.length ? subs.reduce((b, s) => (s.overall_score || 0) > (b.overall_score || 0) ? s : b, subs[0]) : null, 
-  [subs]);
-
-  const funniest = useMemo(() => 
-    subs.filter(s => s.roast).sort((a, b) => b.roast.length - a.roast.length)[0] || null, 
-  [subs]);
-
-  const mostActive = useMemo(() => 
-    [...lb].sort((a, b) => b.count - a.count)[0], 
-  [lb]);
-
-  const toast = useCallback((msg, type = "ok") => {
-    setNotif({ msg, type });
-    clearTimeout(ntRef.current);
-    ntRef.current = setTimeout(() => setNotif(null), 4000);
-  }, []);
-  
   const closeUpload=useCallback(()=>{setUF(null);setPrev(null);setRF(null);setJE("");setStatus("");},[]);
 
   const handleFile=useCallback(e=>{
@@ -501,7 +481,7 @@ const row = {
     {tab==="home"&&<div style={{padding:"0 20px 80px",maxWidth:"1360px",margin:"0 auto"}}>
       <section style={{marginBottom:"60px"}}>
         <h2 style={{fontFamily:OF,color:C.cyan,textShadow:"0 0 16px "+C.cyan,fontSize:"20px",textAlign:"center",marginBottom:"24px",letterSpacing:"3px"}}>⚡ TODAY'S CHALLENGE</h2>
-        <div style={{...CARD,padding:"",textAlign:"center",border:"1px solid rgba(0,229,255,0.35)",maxWidth:"760px",margin:"0 auto",boxShadow:"0 0 50px rgba(0,229,255,0.07)",position:"relative",overflow:"hidden"}}>
+        <div style={{...CARD,padding:"36px",textAlign:"center",border:"1px solid rgba(0,229,255,0.35)",maxWidth:"760px",margin:"0 auto",boxShadow:"0 0 50px rgba(0,229,255,0.07)",position:"relative",overflow:"hidden"}}>
           <div style={{position:"absolute",top:0,left:0,right:0,height:"2px",background:"linear-gradient(90deg,transparent,"+C.cyan+",transparent)"}}/>
           <div style={{display:"flex",justifyContent:"center",gap:"10px",marginBottom:"18px",flexWrap:"wrap"}}>
             <span style={{background:diffColor(chall.difficulty)+"22",color:diffColor(chall.difficulty),border:"1px solid currentColor",padding:"3px 12px",borderRadius:"20px",fontSize:"11px",fontFamily:OF,letterSpacing:"2px"}}>{(chall.difficulty||"Hard").toUpperCase()}</span>
