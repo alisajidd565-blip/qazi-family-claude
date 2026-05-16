@@ -313,13 +313,12 @@ function App(){
     }).sort((a,b)=>b.total-a.total)
   ,[subs]);
   
-     const subsByCousin = useMemo(() => {
+      const subsByCousin = useMemo(() => {
     const m = {};
     COUSINS.forEach(c => { m[c.id] = subs.filter(s => s.cousin_id === c.id); });
     return m;
   }, [subs]);
 
-  // FIXED LEADERBOARD
   const lb = useMemo(() => {
     return COUSINS.map(cousin => {
       const subsList = subsByCousin[cousin.id] || [];
