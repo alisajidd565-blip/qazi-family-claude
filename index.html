@@ -305,23 +305,24 @@ function App(){
   },[]);
 
   // ===== MEMOIZED COMPUTATIONS =====
-  const lb=useMemo(()=>
-    COUSINS.map(c=>{
-      const cs=subs.filter(s=>s.cousin_id===c.id);
-      const total=cs.reduce((a,s)=>a+(s.overall_score||0),0);
-      return{...c,total,count:cs.length,avg:cs.length?+(total/cs.length).toFixed(1):0};
-    }).sort((a,b)=>b.total-a.total)
-  ,[subs]);
-  const deferredLb=useDeferredValue(lb);
-
   const subsByCousin=useMemo(()=>{
     const m={};COUSINS.forEach(c=>{m[c.id]=subs.filter(s=>s.cousin_id===c.id);});return m;
   },[subs]);
 
-  const totalPts=useMemo(()=>subs.reduce((a,s)=>a+(s.overall_score||0),0),[subs]);
-  const bestSub=useMemo(()=>subs.length?subs.reduce((b,s)=>(s.overall_score||0)>(b.overall_score||0)?s:b,subs[0]):null,[subs]);
+  const lb=useMemo(()=>
+    COUSINS.map(c=>{
+      const cs=subsByCousin[c.id]||[];
+      const total=parseFloat(cs.reduce((a,s)=>a+parseFloat(s.overall_score||0),0).toFixed(1));
+      const avg=cs.length?parseFloat((total/cs.length).toFixed(1)):0;
+      return{...c,total,count:cs.length,avg};
+    }).sort((a,b)=>b.total-a.total)
+  ,[subsByCousin]);
+  const deferredLb=useDeferredValue(lb);
+
+  const totalPts=useMemo(()=>parseFloat(subs.reduce((a,s)=>a+parseFloat(s.overall_score||0),0).toFixed(1)),[subs]);
+  const bestSub=useMemo(()=>subs.length?subs.reduce((b,s)=>parseFloat(s.overall_score||0)>parseFloat(b.overall_score||0)?s:b,subs[0]):null,[subs]);
   const funniest=useMemo(()=>subs.filter(s=>s.roast).sort((a,b)=>b.roast.length-a.roast.length)[0]||null,[subs]);
-  const mostActive=useMemo(()=>[...deferredLb].sort((a,b)=>b.count-a.count)[0],[lb]);
+  const mostActive=useMemo(()=>[...lb].sort((a,b)=>b.count-a.count)[0],[lb]);
 
   const toast=useCallback((msg,type="ok")=>{
     setNotif({msg,type});clearTimeout(ntRef.current);
@@ -520,16 +521,22 @@ const row = {
       <h2 style={{fontFamily:OF,color:C.cyan,textShadow:"0 0 16px "+C.cyan,fontSize:"24px",textAlign:"center",marginBottom:"32px",letterSpacing:"4px"}}>🏆 LEADERBOARD</h2>
       <div style={{display:"flex",justifyContent:"center",gap:"14px",marginBottom:"40px",alignItems:"flex-end",flexWrap:"wrap"}}>
         {deferredLb.slice(0,3).map((c,i)=>{
-          const ph=["175px","215px","150px"],po=[1,0,2],md2=["🥈","🥇","🥉"],mc=[C.muted,C.gold,"#cd7f32"];
+          // i=0 is rank1(gold), i=1 is rank2(silver), i=2 is rank3(bronze)
+          // Visual order: rank2 left, rank1 center, rank3 right
+          const visOrder=[1,0,2]; // rank2=order0(left), rank1=order1(center), rank3=order2(right)
+          const podiumH=["215px","175px","150px"]; // rank1 tallest
+          const medals=["🥇","🥈","🥉"];
+          const colors=[C.gold,C.muted,"#cd7f32"];
+          const col=colors[i];
           return(
-            <div key={c.id} style={{order:po[i],textAlign:"center",minWidth:"125px"}}>
-              <img src={c.img} alt={c.name} loading="lazy" style={{width:i===0?"80px":"66px",height:i===0?"80px":"66px",borderRadius:"50%",objectFit:"cover",border:"3px solid "+mc[i],boxShadow:"0 0 20px "+mc[i]+"55",marginBottom:"8px"}}/>
-              <div style={{fontSize:"24px"}}>{md2[i]}</div>
-              <div style={{color:mc[i],fontFamily:OF,fontSize:"12px",fontWeight:"700",marginBottom:"4px"}}>{c.name.split(" ")[0]}</div>
-              <div style={{background:mc[i]+"22",border:"1px solid "+mc[i]+"44",borderRadius:"12px",height:ph[i],display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",paddingTop:"16px"}}>
-                <div style={{fontSize:"24px",fontWeight:"900",color:mc[i],fontFamily:OF}}>{c.total}</div>
+            <div key={c.id} style={{order:visOrder[i],textAlign:"center",minWidth:"125px"}}>
+              <img src={c.img} alt={c.name} loading="lazy" style={{width:i===0?"88px":"70px",height:i===0?"88px":"70px",borderRadius:"50%",objectFit:"cover",border:"3px solid "+col,boxShadow:"0 0 20px "+col+"55",marginBottom:"8px"}}/>
+              <div style={{fontSize:"24px"}}>{medals[i]}</div>
+              <div style={{color:col,fontFamily:OF,fontSize:"12px",fontWeight:"700",marginBottom:"4px"}}>{c.name.split(" ")[0]}</div>
+              <div style={{background:col+"22",border:"1px solid "+col+"44",borderRadius:"12px",height:podiumH[i],display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",paddingTop:"16px"}}>
+                <div style={{fontSize:"24px",fontWeight:"900",color:col,fontFamily:OF}}>{c.total}</div>
                 <div style={{fontSize:"10px",color:C.muted,letterSpacing:"1px"}}>POINTS</div>
-                <div style={{fontSize:"11px",color:C.muted,marginTop:"4px"}}>{c.count} games</div>
+                <div style={{fontSize:"11px",color:C.muted,marginTop:"4px"}}>{c.count} game{c.count!==1?"s":""}</div>
               </div>
             </div>
           );
