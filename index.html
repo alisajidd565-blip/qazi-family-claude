@@ -145,26 +145,30 @@ async function callGroqJudge(base64Data,mimeType,challengePrompt,refB64,refMime)
 A REFERENCE IMAGE has been provided above (first image). It is purely a rough visual mood-board uploaded by the organiser — a loose atmospheric hint only.
 CRITICAL: Do NOT score or penalise based on similarity/deviation from the reference image. The reference carries ZERO weight in your scoring. It is shown only so you understand the general theme, nothing more.`:"";
 
-  const prompt=`You are a fair and encouraging AI judge for the "AI Enthusiasts - Qazi Family" image competition.
-${refNote}
+  const prompt = `You are a fair and encouraging AI judge for the "AI Enthusiasts - Qazi Family" image competition.
+
 TASK the participant was given: "${challengePrompt}"
 
-You are now looking at the PARTICIPANT'S submitted image${hasRef?" (second image)":""}.
+You are now looking at the PARTICIPANT'S submitted image${hasRef ? " (second image)" : ""}.
 
 JUDGING CRITERIA — score each out of 10:
-1. creativity_score  — How imaginative, original, and inventive is the image?
-2. adherence_score   — How well does the image address the TASK TEXT above? Judge against the written task only, not against the reference image.
-3. artistic_quality_score — Visual polish: composition, colour, detail, aesthetics.
+1. visual_score        — Overall visual quality, aesthetics, composition, detail, and artistic polish.
+2. task_score          — How well the image follows and fulfills the given TASK prompt.
 
 SCORING RULES:
-- Base your scores ENTIRELY on the participant's image quality and how it fits the written task.
-- The reference image (if any) has NO bearing on scores whatsoever — ignore it for scoring.
 - Be fair, generous, and constructive.
-- overall_score = (creativity_score × 0.4) + (artistic_quality_score × 0.45) + (adherence_score × 0.15). Round to 1 decimal.
+- overall_score = (visual_score × 0.6) + (task_score × 0.4). Round to 1 decimal place.
 
 Reply ONLY with valid JSON, no extra text:
-{"creativity_score":<1-10>,"adherence_score":<1-10>,"artistic_quality_score":<1-10>,"overall_score":<1-10>,"review":"<2-3 sentence review of the participant image>","improvements":"<2-3 specific improvement tips>","roast":"<short funny roast>"}`;
-
+{
+  "visual_score": <1-10>,
+  "task_score": <1-10>,
+  "overall_score": <1-10>,
+  "review": "<2-3 sentence review>",
+  "improvements": "<2-3 specific improvement tips>",
+  "roast": "<short funny roast>"
+}`;
+  
   const contentArr=[];
   if(hasRef){
     contentArr.push({type:"image_url",image_url:{url:"data:"+refMime+";base64,"+refB64}});
@@ -356,20 +360,26 @@ function App(){
           refB64=await new Promise(res=>{const rd=new FileReader();rd.onload=e=>res(e.target.result.split(",")[1]);rd.readAsDataURL(rb);});
         }catch(_){}
       }
-      const result=await callGroqJudge(b64,rawFile.type,chall.prompt,refB64,refMime);const parse = v => parseFloat(parseFloat(v).toFixed(1));
-const parse = v => parseFloat(parseFloat(v).toFixed(1));
-const row={
-  cousin_id:uploadFor,
-  challenge_id:chall.id||null,
-  challenge_prompt:chall.prompt,
-  image_url:imageUrl,
-  visual_score:parse(result.visual_score),
-  task_score:parse(result.task_score),
-  overall_score:parse(result.overall_score),
-  review:result.review,
-  improvements:result.improvements,
-  roast:result.roast,
-};      const saved=await dbInsertSubmission(row);
+      const result=await callGroqJudge(b64,rawFile.type,chall.prompt,refB64,refMime);
+      const safeParse = (v) => {
+  const num = parseFloat(v);
+  return isNaN(num) ? 5.0 : Number(num.toFixed(1));
+};
+
+const row = {
+  cousin_id: uploadFor,
+  challenge_id: chall.id || null,
+  challenge_prompt: chall.prompt,
+  image_url: imageUrl,
+  visual_score: safeParse(result.visual_score),
+  task_score: safeParse(result.task_score),
+  overall_score: safeParse(result.overall_score),
+  review: result.review || "",
+  improvements: result.improvements || "",
+  roast: result.roast || "",
+};
+      
+      const saved=await dbInsertSubmission(row);
       setViewSub(saved);
       closeUpload();
       toast("Judged! Score: "+result.overall_score+"/10 ⚡");
