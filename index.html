@@ -305,14 +305,6 @@ function App(){
   },[]);
 
   // ===== MEMOIZED COMPUTATIONS =====
-  const lb=useMemo(()=>
-    COUSINS.map(c=>{
-      const cs=subs.filter(s=>s.cousin_id===c.id);
-      const total=cs.reduce((a,s)=>a+(s.overall_score||0),0);
-      return{...c,total,count:cs.length,avg:cs.length?+(total/cs.length).toFixed(1):0};
-    }).sort((a,b)=>b.total-a.total)
-  ,[subs]);
-  
       const subsByCousin = useMemo(() => {
     const m = {};
     COUSINS.forEach(c => { m[c.id] = subs.filter(s => s.cousin_id === c.id); });
@@ -334,6 +326,10 @@ function App(){
 
   const deferredLb = useDeferredValue(lb);
 
+  const totalPts = useMemo(() => 
+    lb.reduce((a, c) => a + c.total, 0).toFixed(1), 
+  [lb]);
+
   const bestSub = useMemo(() => 
     subs.length ? subs.reduce((b, s) => (s.overall_score || 0) > (b.overall_score || 0) ? s : b, subs[0]) : null, 
   [subs]);
@@ -352,10 +348,6 @@ function App(){
     ntRef.current = setTimeout(() => setNotif(null), 4000);
   }, []);
   
-  setNotif({msg,type});
-    clearTimeout(ntRef.current);
-    ntRef.current=setTimeout(()=>setNotif(null),4000);
-  },[]);
   const closeUpload=useCallback(()=>{setUF(null);setPrev(null);setRF(null);setJE("");setStatus("");},[]);
 
   const handleFile=useCallback(e=>{
