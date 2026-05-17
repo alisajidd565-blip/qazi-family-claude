@@ -232,6 +232,14 @@ async function dbUpsertIntro(cousin_id,intro){
   const{error}=await sb.from("qazi_intros").upsert({cousin_id,intro,updated_at:new Date().toISOString()});
   if(error)throw error;
 }
+async function dbFetchHof(){
+  const{data,error}=await sb.from("qazi_hof").select("*").order("created_at",{ascending:false});
+  if(error){console.warn("qazi_hof table missing or unavailable",error);return [];} return data||[];
+}
+async function dbUpsertHof(row){
+  const{data,error}=await sb.from("qazi_hof").upsert(row).select();
+  if(error)throw error; return data;
+}
 async function dbDeleteSubmission(id){
   const{error}=await sb.from("qazi_submissions").delete().eq("id",id);
   if(error)throw error;
@@ -457,7 +465,7 @@ function App(){
   useEffect(()=>{
     const init=async()=>{
       try{
-        const[s,c,i,p]=await Promise.all([dbFetchSubmissions(),dbFetchChallenges(),dbFetchIntros(),dbFetchProfiles()]);
+        const[s,c,i,p,h]=await Promise.all([dbFetchSubmissions(),dbFetchChallenges(),dbFetchIntros(),dbFetchProfiles(),dbFetchHof()]);
         setSubs(s);
         const loadedChalls=c.length>0?c:[DEFAULT_CHALL];
         setChalls(loadedChalls);
@@ -475,6 +483,21 @@ function App(){
           };
         });
         setProfileOverrides(overrides);
+        // If DB HOF records exist, prefer them over localStorage
+        if(Array.isArray(h) && h.length>0){
+          const mapped=h.map(r=>({
+            month:r.month||"",
+            id:r.cousin_id||r.id||r.cousin||"",
+            name:r.name||"",
+            emoji:r.emoji||"🏆",
+            color:r.color||C.gold,
+            pts:Math.round(r.pts||r.points||0),
+            img:r.img||"",
+            created_at:r.created_at||null,
+          }));
+          setHofRecords(mapped);
+          try{localStorage.setItem("qazi_hof",JSON.stringify(mapped));}catch(_){}
+        }
       }catch(e){toast("DB load error: "+e.message,"err");}
       setLoading(false);
     };
@@ -490,6 +513,13 @@ function App(){
       })
       .on("postgres_changes",{event:"*",schema:"public",table:"qazi_intros"},()=>{
         clearTimeout(rtRef.current.intros);rtRef.current.intros=setTimeout(()=>dbFetchIntros().then(d=>startTransition(()=>setIntros(d))).catch(()=>{}),400);
+      })
+      .on("postgres_changes",{event:"*",schema:"public",table:"qazi_hof"},()=>{
+        clearTimeout(rtRef.current.hof);rtRef.current.hof=setTimeout(()=>dbFetchHof().then(d=>startTransition(()=>{
+          const mapped=(d||[]).map(r=>({month:r.month||"",id:r.cousin_id||r.id||r.cousin||"",name:r.name||"",emoji:r.emoji||"🏆",color:r.color||C.gold,pts:Math.round(r.pts||r.points||0),img:r.img||"",created_at:r.created_at||null}));
+          setHofRecords(mapped);
+          try{localStorage.setItem("qazi_hof",JSON.stringify(mapped));}catch(_){}
+        })).catch(()=>{}),400);
       })
       .subscribe();
 
@@ -654,7 +684,7 @@ const row = {
     }catch(e){toast("Error: "+e.message,"err");}
   },[toast]);
 
-  const recordHofWinner=useCallback(()=>{
+  const recordHofWinner=useCallback(async()=>{
     const now=new Date();
     const prevStart=DateUtil.prevMonthStart(now);
     const prevEnd=DateUtil.prevMonthEnd(now);
@@ -671,11 +701,25 @@ const row = {
     if(!entries.length)return toast("No submissions found for "+monthLabel,"err");
     const [winnerId,winnerPts]=entries[0];
     const winner=getCousin(winnerId);
-    const record={month:monthLabel,id:winnerId,name:winner?.name||winnerId,emoji:winner?.emoji||"🏆",color:winner?.color||C.gold,pts:Math.round(winnerPts),img:winner?.img||""};
-    const updated=[record,...hofRecords];
-    setHofRecords(updated);
-    localStorage.setItem("qazi_hof",JSON.stringify(updated));
-    toast("HOF recorded: "+record.name+" wins "+monthLabel+" 🏆");
+    const record={month:monthLabel,cousin_id:winnerId,name:winner?.name||winnerId,emoji:winner?.emoji||"🏆",color:winner?.color||C.gold,pts:Math.round(winnerPts),img:winner?.img||""};
+
+    // Try to persist to Supabase; fall back to localStorage on error
+    try{
+      const saved = await dbUpsertHof(record);
+      // dbUpsertHof returns inserted/updated rows; prefer the first row if present
+      const savedRow = Array.isArray(saved) && saved[0] ? saved[0] : (saved || null);
+      const mapped = savedRow ? {month:savedRow.month||monthLabel,id:savedRow.cousin_id||savedRow.id||winnerId,name:savedRow.name||record.name,emoji:savedRow.emoji||record.emoji,color:savedRow.color||record.color,pts:Math.round(savedRow.pts||savedRow.points||record.pts),img:savedRow.img||record.img,created_at:savedRow.created_at||null} : {month:monthLabel,id:winnerId,name:record.name,emoji:record.emoji,color:record.color,pts:record.pts,img:record.img};
+      const updated=[mapped,...hofRecords];
+      setHofRecords(updated);
+      try{localStorage.setItem("qazi_hof",JSON.stringify(updated));}catch(_){}
+      toast("HOF recorded (db): "+mapped.name+" wins "+monthLabel+" 🏆");
+    }catch(e){
+      const fallback={month:monthLabel,id:winnerId,name:record.name,emoji:record.emoji,color:record.color,pts:record.pts,img:record.img};
+      const updated=[fallback,...hofRecords];
+      setHofRecords(updated);
+      try{localStorage.setItem("qazi_hof",JSON.stringify(updated));}catch(_){}
+      toast("HOF recorded locally (db failed): "+fallback.name+" wins "+monthLabel+" 🏆","err");
+    }
   },[subs,hofRecords,toast]);
 
   const handleUpload=useCallback((id,action)=>{
