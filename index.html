@@ -298,13 +298,45 @@ Reply ONLY with valid JSON, no extra text:
 }
 </script>
 
+<script>
+// ===== DATE UTILITY MODULE =====
+const DateUtil = {
+  getWeekStart(date = new Date()) {
+    const d = new Date(date);
+    const day = d.getDay(); // 0=Sun, 1=Mon
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // move to Monday
+    d.setDate(diff);
+    d.setHours(0,0,0,0);
+    return d;
+  },
+  getMonthStart(date = new Date()){
+    return new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
+  },
+  isThisWeek(date){
+    return new Date(date) >= this.getWeekStart();
+  },
+  isThisMonth(date){
+    return new Date(date) >= this.getMonthStart();
+  },
+  formatMonthYear(date = new Date()){
+    return date.toLocaleString('default',{month:'long',year:'numeric'});
+  },
+  prevMonthStart(date = new Date()){
+    return new Date(date.getFullYear(), date.getMonth()-1, 1, 0,0,0,0);
+  },
+  prevMonthEnd(date = new Date()){
+    return new Date(date.getFullYear(), date.getMonth(), 0, 23,59,59,999);
+  }
+};
+</script>
+
 <script type="text/babel" data-presets="react" data-plugins="proposal-optional-chaining,proposal-nullish-coalescing-operator">
 const{useState,useEffect,useRef,useMemo,useCallback,memo,startTransition,useTransition,useDeferredValue}=React;
 
 // ===== COUSIN CARD (memoized) =====
 const CousinCard=memo(function CousinCard({cousin,rank,subs,adminMode,onGallery,onUpload,onView,customIntro}){
-  const total=parseFloat(subs.reduce((a,s)=>a+parseFloat(s.overall_score||0),0).toFixed(1));
-  const avg=subs.length?(total/subs.length).toFixed(1):"—";
+  const total=Math.round(subs.reduce((a,s)=>a+parseFloat(s.overall_score||0),0));
+  const avg=subs.length?Math.round(total/subs.length):"—";
   const latest=subs[subs.length-1];
   const intro=customIntro||cousin.intro;
   const st=CST[cousin.id];
@@ -343,7 +375,7 @@ const CousinCard=memo(function CousinCard({cousin,rank,subs,adminMode,onGallery,
             <div style={{fontSize:"9px",color:C.muted,marginBottom:"6px",letterSpacing:"1.5px",fontFamily:OF}}>LATEST SUBMISSION</div>
             <div className="gal-card" style={{...st.lb,borderRadius:"10px"}} onClick={()=>onView(latest)}>
               <img src={clUrl(latest.image_url,"w_400,h_220,c_fill")} alt="Latest" style={{width:"100%",height:"110px",objectFit:"cover",display:"block"}} loading="lazy"/>
-              <div style={{position:"absolute",bottom:"7px",right:"7px",background:"rgba(0,0,0,0.88)",borderRadius:"6px",padding:"3px 8px",fontSize:"11px",color:C.gold,fontFamily:OF,backdropFilter:"blur(4px)"}}>{latest.overall_score}/10</div>
+              <div style={{position:"absolute",bottom:"7px",right:"7px",background:"rgba(0,0,0,0.88)",borderRadius:"6px",padding:"3px 8px",fontSize:"11px",color:C.gold,fontFamily:OF,backdropFilter:"blur(4px)"}}>{Math.round(parseFloat(latest.overall_score||0))}/10</div>
             </div>
           </div>
         )}
@@ -476,14 +508,10 @@ function App(){
   const roundScore=v=>Math.round(v);
 
   const viewSubs=useMemo(()=>{
-    const now=new Date();
-    const weekStart=new Date(now);
-    weekStart.setDate(now.getDate()-7);
-    const monthStart=new Date(now.getFullYear(),now.getMonth(),1);
     return subs.filter(s=>{
       const created=new Date(s.created_at||s.createdAt||0);
-      if(leaderboardView==="weekly")return created>=weekStart;
-      if(leaderboardView==="monthly")return created>=monthStart;
+      if(leaderboardView==="weekly")return DateUtil.isThisWeek(created);
+      if(leaderboardView==="monthly")return DateUtil.isThisMonth(created);
       return true;
     });
   },[subs,leaderboardView]);
@@ -511,8 +539,16 @@ function App(){
   const funniest=useMemo(()=>subs.filter(s=>s.roast).sort((a,b)=>b.roast.length-a.roast.length)[0]||null,[subs]);
   const mostActive=useMemo(()=>[...lb].sort((a,b)=>b.count-a.count)[0],[lb]);
 
-  // O(1) rank lookup — avoids findIndex on every CousinCard render
-  const rankMap=useMemo(()=>{const m={};deferredLb.forEach((c,i)=>{m[c.id]=i+1;});return m;},[deferredLb]);
+  // O(1) rank lookup — handles ties so equal totals share the same rank
+  const rankMap=useMemo(()=>{
+    const m={};
+    let rank=1;
+    deferredLb.forEach((c,i)=>{
+      if(i>0 && c.total < deferredLb[i-1].total) rank=i+1;
+      m[c.id]=rank;
+    });
+    return m;
+  },[deferredLb]);
   // Memoized reversed arrays — avoids new array allocation every render
   const reversedChallenges=useMemo(()=>[...challenges].reverse(),[challenges]);
   // Precomputed submission counts per challenge — avoids O(n*m) filter in render
@@ -900,7 +936,7 @@ const row = {
         </div>
         <img src={clUrl(s.image_url,"w_600,h_400,c_fill")} alt="" style={{width:"100%",maxHeight:"200px",objectFit:"cover",borderRadius:"10px",marginBottom:"16px",border:"1px solid "+sc+"44"}}/>
         <div style={{textAlign:"center",marginBottom:"20px"}}>
-          <div style={{fontSize:"54px",fontWeight:"900",color:sc,fontFamily:OF,textShadow:"0 0 25px "+sc}}>{s.overall_score}<span style={{fontSize:"20px",color:C.muted}}>/10</span></div>
+          <div style={{fontSize:"54px",fontWeight:"900",color:sc,fontFamily:OF,textShadow:"0 0 25px "+sc}}>{Math.round(parseFloat(s.overall_score||0))}<span style={{fontSize:"20px",color:C.muted}}>/10</span></div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px",marginBottom:"16px"}}>
   {[
@@ -943,9 +979,9 @@ const row = {
               <div key={sub.id} style={{...CARD,overflow:"hidden",cursor:"pointer",border:"1px solid "+c?.color+"33"}} onClick={()=>setViewSub(sub)}>
                 <img src={clUrl(sub.image_url,"w_360,h_240,c_fill")} alt="" loading="lazy" style={{width:"100%",height:"120px",objectFit:"cover"}}/>
                 <div style={{padding:"9px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span style={{fontSize:"10px",color:C.muted}}>{new Date(sub.created_at).toLocaleDateString()}</span>
-                  <span style={{color:C.gold,fontFamily:OF,fontSize:"13px",fontWeight:"700"}}>{sub.overall_score}/10</span>
-                </div>
+                              <span style={{fontSize:"10px",color:C.muted}}>{new Date(sub.created_at).toLocaleDateString()}</span>
+                              <span style={{color:C.gold,fontFamily:OF,fontSize:"13px",fontWeight:"700"}}>{Math.round(parseFloat(sub.overall_score||0))}/10</span>
+                            </div>
               </div>
             ))}
           </div>
