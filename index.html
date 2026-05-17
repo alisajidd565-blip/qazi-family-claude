@@ -212,6 +212,22 @@ async function dbInsertChallenge(row){
   const{data,error}=await sb.from("qazi_challenges").insert(row).select().single();
   if(error)throw error; return data;
 }
+async function dbUpdateChallenge(id,row){
+  const{data,error}=await sb.from("qazi_challenges").update(row).eq("id",id).select().single();
+  if(error)throw error; return data;
+}
+async function dbDeleteChallenge(id){
+  const{error}=await sb.from("qazi_challenges").delete().eq("id",id);
+  if(error)throw error;
+}
+async function dbFetchProfiles(){
+  const{data,error}=await sb.from("qazi_profiles").select("*");
+  if(error){console.warn("qazi_profiles table missing or unavailable",error);return [];} return data||[];
+}
+async function dbUpsertProfile(row){
+  const{data,error}=await sb.from("qazi_profiles").upsert(row).select();
+  if(error)throw error; return data;
+}
 async function dbUpsertIntro(cousin_id,intro){
   const{error}=await sb.from("qazi_intros").upsert({cousin_id,intro,updated_at:new Date().toISOString()});
   if(error)throw error;
@@ -282,7 +298,7 @@ Reply ONLY with valid JSON, no extra text:
 }
 </script>
 
-<script type="text/babel">
+<script type="text/babel" data-presets="react" data-plugins="proposal-optional-chaining,proposal-nullish-coalescing-operator">
 const{useState,useEffect,useRef,useMemo,useCallback,memo,startTransition,useTransition,useDeferredValue}=React;
 
 // ===== COUSIN CARD (memoized) =====
@@ -372,22 +388,60 @@ function App(){
   const[editTxt,setET]=useState("");
   const[newRefImg,setNRI]=useState(null);
   const[newRefFile,setNRF]=useState(null);
+  const[activeChallengeId,setActiveChallengeId]=useState(null);
+  const[showManageChallenges,setManageChallenges]=useState(false);
+  const[challengeEditId,setChallengeEditId]=useState(null);
+  const[challengeEditPrompt,setChallengeEditPrompt]=useState("");
+  const[challengeEditDiff,setChallengeEditDiff]=useState("Medium");
+  const[challengeEditRefImg,setChallengeEditRefImg]=useState(null);
+  const[challengeEditRefFile,setChallengeEditRefFile]=useState(null);
+  const[showProfileManager,setProfileManager]=useState(false);
+  const[profileEditId,setProfileEditId]=useState(null);
+  const[profileEditEmoji,setProfileEditEmoji]=useState("");
+  const[profileEditIntro,setProfileEditIntro]=useState("");
+  const[profileEditTitle,setProfileEditTitle]=useState("");
+  const[profileEditImg,setProfileEditImg]=useState(null);
+  const[profileEditFile,setProfileEditFile]=useState(null);
+  const[profileOverrides,setProfileOverrides]=useState({});
+  const[leaderboardView,setLeaderboardView]=useState("total");
   const fileRef=useRef(null);
   const refImgRef=useRef(null);
+  const challengeRefImgRef=useRef(null);
+  const profileImgRef=useRef(null);
   const ntRef=useRef(null);
   // Debounce refs for realtime — avoids polluting window scope
   const rtRef=useRef({});
 
-  const chall=challenges[challenges.length-1];
+  const activeChallenge = useMemo(()=>{
+    if(activeChallengeId){
+      return challenges.find(c=>c.id===activeChallengeId) || challenges[challenges.length-1];
+    }
+    return challenges[challenges.length-1];
+  },[activeChallengeId,challenges]);
+  const chall=activeChallenge||DEFAULT_CHALL;
 
   // ===== LOAD DATA =====
   useEffect(()=>{
     const init=async()=>{
       try{
-        const[s,c,i]=await Promise.all([dbFetchSubmissions(),dbFetchChallenges(),dbFetchIntros()]);
+        const[s,c,i,p]=await Promise.all([dbFetchSubmissions(),dbFetchChallenges(),dbFetchIntros(),dbFetchProfiles()]);
         setSubs(s);
-        if(c.length>0)setChalls(c); else setChalls([DEFAULT_CHALL]);
+        const loadedChalls=c.length>0?c:[DEFAULT_CHALL];
+        setChalls(loadedChalls);
+        setActiveChallengeId(loadedChalls.length?loadedChalls[loadedChalls.length-1].id:null);
         setIntros(i);
+        const overrides={};
+        p.forEach(r=>{
+          if(!r.cousin_id)return;
+          overrides[r.cousin_id]={
+            ...(r.name?{name:r.name}:{}),
+            ...(r.img?{img:r.img}:{}),
+            ...(r.emoji?{emoji:r.emoji}:{}),
+            ...(r.intro?{intro:r.intro}:{}),
+            ...(r.title?{title:r.title}:{}),
+          };
+        });
+        setProfileOverrides(overrides);
       }catch(e){toast("DB load error: "+e.message,"err");}
       setLoading(false);
     };
@@ -416,21 +470,43 @@ function App(){
   },[]);
 
   // ===== MEMOIZED COMPUTATIONS =====
+  const cousins=useMemo(()=>COUSINS.map(c=>({...c,...(profileOverrides[c.id]||{})})),[profileOverrides]);
+  const cousinMap=useMemo(()=>new Map(cousins.map(c=>[c.id,c])),[cousins]);
+  const getCousin=id=>cousinMap.get(id)||COUSIN_MAP.get(id);
+  const roundScore=v=>Math.round(v);
+
+  const viewSubs=useMemo(()=>{
+    const now=new Date();
+    const weekStart=new Date(now);
+    weekStart.setDate(now.getDate()-7);
+    const monthStart=new Date(now.getFullYear(),now.getMonth(),1);
+    return subs.filter(s=>{
+      const created=new Date(s.created_at||s.createdAt||0);
+      if(leaderboardView==="weekly")return created>=weekStart;
+      if(leaderboardView==="monthly")return created>=monthStart;
+      return true;
+    });
+  },[subs,leaderboardView]);
+
   const subsByCousin=useMemo(()=>{
-    const m={};COUSINS.forEach(c=>{m[c.id]=subs.filter(s=>s.cousin_id===c.id);});return m;
-  },[subs]);
+    const m={};cousins.forEach(c=>{m[c.id]=subs.filter(s=>s.cousin_id===c.id);});return m;
+  },[subs,cousins]);
+
+  const viewSubsByCousin=useMemo(()=>{
+    const m={};cousins.forEach(c=>{m[c.id]=viewSubs.filter(s=>s.cousin_id===c.id);});return m;
+  },[viewSubs,cousins]);
 
   const lb=useMemo(()=>
-    COUSINS.map(c=>{
-      const cs=subsByCousin[c.id]||[];
-      const total=parseFloat(cs.reduce((a,s)=>a+parseFloat(s.overall_score||0),0).toFixed(1));
-      const avg=cs.length?parseFloat((total/cs.length).toFixed(1)):0;
+    cousins.map(c=>{
+      const cs=viewSubsByCousin[c.id]||[];
+      const total=roundScore(cs.reduce((a,s)=>a+parseFloat(s.overall_score||0),0));
+      const avg=cs.length?roundScore(total/cs.length):0;
       return{...c,total,count:cs.length,avg};
     }).sort((a,b)=>b.total-a.total)
-  ,[subsByCousin]);
+  ,[viewSubsByCousin,cousins]);
   const deferredLb=useDeferredValue(lb);
 
-  const totalPts=useMemo(()=>parseFloat(subs.reduce((a,s)=>a+parseFloat(s.overall_score||0),0).toFixed(1)),[subs]);
+  const totalPts=useMemo(()=>roundScore(subs.reduce((a,s)=>a+parseFloat(s.overall_score||0),0)),[subs]);
   const bestSub=useMemo(()=>subs.length?subs.reduce((b,s)=>parseFloat(s.overall_score||0)>parseFloat(b.overall_score||0)?s:b,subs[0]):null,[subs]);
   const funniest=useMemo(()=>subs.filter(s=>s.roast).sort((a,b)=>b.roast.length-a.roast.length)[0]||null,[subs]);
   const mostActive=useMemo(()=>[...lb].sort((a,b)=>b.count-a.count)[0],[lb]);
@@ -658,7 +734,7 @@ const row = {
       <section>
         <h2 style={{fontFamily:OF,color:C.cyan,textShadow:"0 0 16px "+C.cyan,fontSize:"20px",textAlign:"center",marginBottom:"28px",letterSpacing:"3px"}}>⚔️ THE COMPETITORS</h2>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(min(100%,300px),1fr))",gap:"16px"}}>
-          {COUSINS.map(cousin=>(
+          {cousins.map(cousin=>(
             <CousinCard key={cousin.id} cousin={cousin} rank={rankMap[cousin.id]||7} subs={subsByCousin[cousin.id]} adminMode={adminMode} onGallery={setGallery} onUpload={handleUpload} onView={setViewSub} customIntro={intros[cousin.id]}/>
           ))}
         </div>
@@ -666,7 +742,12 @@ const row = {
     </div>}
 
     {tab==="leaderboard"&&<div style={{padding:"36px 16px 80px",maxWidth:"820px",margin:"0 auto"}}>
-      <h2 style={{fontFamily:OF,color:C.cyan,textShadow:"0 0 16px rgba(0,229,255,0.6)",fontSize:"clamp(18px,4vw,24px)",textAlign:"center",marginBottom:"36px",letterSpacing:"4px"}}>🏆 LEADERBOARD</h2>
+      <h2 style={{fontFamily:OF,color:C.cyan,textShadow:"0 0 16px rgba(0,229,255,0.6)",fontSize:"clamp(18px,4vw,24px)",textAlign:"center",marginBottom:"16px",letterSpacing:"4px"}}>🏆 LEADERBOARD</h2>
+      <div style={{display:"flex",justifyContent:"center",gap:"10px",marginBottom:"24px",flexWrap:"wrap"}}>
+        {[["total","TOTAL"],["monthly","MONTHLY"],["weekly","WEEKLY"]].map(([value,label])=>(
+          <button key={value} onClick={()=>setLeaderboardView(value)} style={{padding:"8px 14px",borderRadius:"999px",border:"1px solid rgba(0,229,255,0.18)",background:leaderboardView===value?"rgba(0,229,255,0.18)":"transparent",color:leaderboardView===value?"#e2e8f0":C.muted,cursor:"pointer",fontSize:"11px",fontFamily:OF,letterSpacing:"1px"}}>{label}</button>
+        ))}
+      </div>
       <div style={{display:"flex",justifyContent:"center",gap:"clamp(8px,2vw,16px)",marginBottom:"44px",alignItems:"flex-end",flexWrap:"wrap"}}>
         {deferredLb.slice(0,3).map((c,i)=>{
           const visOrder=[1,0,2];
