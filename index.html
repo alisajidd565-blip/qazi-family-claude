@@ -511,6 +511,7 @@ return () => {
   clearTimeout(rtRef.current.chall);
   clearTimeout(rtRef.current.intros);
 };
+  },[]);  // ← closes useEffect
 
   // ===== MEMOIZED COMPUTATIONS =====
   const subsByCousin=useMemo(()=>{
