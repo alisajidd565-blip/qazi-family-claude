@@ -307,33 +307,141 @@ Reply ONLY with valid JSON, no extra text:
 </script>
 
 <script>
-// ===== DATE UTILITY MODULE =====
-const DateUtil = {
-  getWeekStart(date = new Date()) {
-    const d = new Date(date);
-    const day = d.getDay(); // 0=Sun, 1=Mon
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // move to Monday
-    d.setDate(diff);
-    d.setHours(0,0,0,0);
-    return d;
+const Calendar = {
+  now() {
+    return new Date();
   },
-  getMonthStart(date = new Date()){
-    return new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
+
+  getYear(date = new Date()) {
+    return date.getFullYear();
   },
-  isThisWeek(date){
-    return new Date(date) >= this.getWeekStart();
+
+  getMonth(date = new Date()) {
+    return date.getMonth() + 1;
   },
-  isThisMonth(date){
-    return new Date(date) >= this.getMonthStart();
+
+  getDay(date = new Date()) {
+    return date.getDate();
   },
-  formatMonthYear(date = new Date()){
-    return date.toLocaleString('default',{month:'long',year:'numeric'});
+
+  getWeek(date = new Date()) {
+    const temp = new Date(date.getTime());
+    temp.setHours(0, 0, 0, 0);
+    temp.setDate(temp.getDate() + 3 - ((temp.getDay() + 6) % 7));
+    const week1 = new Date(temp.getFullYear(), 0, 4);
+    return (
+      1 +
+      Math.round(((temp - week1) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7)
+    );
   },
-  prevMonthStart(date = new Date()){
-    return new Date(date.getFullYear(), date.getMonth()-1, 1, 0,0,0,0);
+
+  getMonthKey(date = new Date()) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
   },
-  prevMonthEnd(date = new Date()){
-    return new Date(date.getFullYear(), date.getMonth(), 0, 23,59,59,999);
+
+  getWeekKey(date = new Date()) {
+    return `${date.getFullYear()}-W${String(this.getWeek(date)).padStart(2, "0")}`;
+  },
+
+  getTodayKey(date = new Date()) {
+    return date.toISOString().split("T")[0];
+  },
+
+  formatMonthYear(date = new Date()) {
+    return date.toLocaleString("default", { month: "long", year: "numeric" });
+  }
+};
+
+const LeaderboardEngine = {
+  getTotal(users) {
+    return users
+      .map(u => ({
+        ...u,
+        score: Math.round(u.score || 0)
+      }))
+      .sort((a, b) => b.score - a.score);
+  },
+
+  getMonthly(users, monthKey) {
+    return users
+      .map(u => ({
+        ...u,
+        score: Math.round(u.monthly?.[monthKey] || 0)
+      }))
+      .sort((a, b) => b.score - a.score);
+  },
+
+  getWeekly(users, weekKey) {
+    return users
+      .map(u => ({
+        ...u,
+        score: Math.round(u.weekly?.[weekKey] || 0)
+      }))
+      .sort((a, b) => b.score - a.score);
+  }
+};
+
+const ChallengeSystem = {
+  getActive(challenges) {
+    const now = Calendar.now();
+    return challenges.find(c => {
+      const start = new Date(c.start_date || c.startDate || c.start_date);
+      const end = new Date(c.end_date || c.endDate || c.end_date);
+      return now >= start && now <= end;
+    });
+  },
+
+  isExpired(challenge) {
+    return Calendar.now() > new Date(challenge.end_date || challenge.endDate || challenge.end_date);
+  },
+
+  addChallenge(challenges, newChallenge) {
+    return [...challenges, newChallenge];
+  },
+
+  updateChallenge(challenges, updated) {
+    return challenges.map(c => (c.id === updated.id ? { ...c, ...updated } : c));
+  },
+
+  deleteChallenge(challenges, id) {
+    return challenges.filter(c => c.id !== id);
+  }
+};
+
+const HOFSystem = {
+  getMonthlyWinner(users, monthKey) {
+    let topUser = null;
+    let maxScore = -1;
+
+    users.forEach(u => {
+      const score = u.monthly?.[monthKey] || 0;
+      if (score > maxScore) {
+        maxScore = score;
+        topUser = u;
+      }
+    });
+
+    return {
+      winner: topUser,
+      score: Math.round(maxScore),
+      month: monthKey
+    };
+  },
+
+  saveToHOF(hof, entry) {
+    return [...hof, entry];
+  }
+};
+
+const ProfileSystem = {
+  updateProfile(user, data) {
+    return {
+      ...user,
+      img: data.img || user.img,
+      emoji: data.emoji || user.emoji,
+      intro: data.intro || user.intro,
+      title: data.title || user.title
+    };
   }
 };
 </script>
@@ -445,6 +553,8 @@ function App(){
   const[profileOverrides,setProfileOverrides]=useState({});
   const[leaderboardView,setLeaderboardView]=useState("total");
   const[hofRecords,setHofRecords]=useState(()=>{try{return JSON.parse(localStorage.getItem("qazi_hof")||"[]");}catch{return []}});
+  const[localTime,setLocalTime]=useState(new Date().toLocaleTimeString());
+  const[pkTime,setPkTime]=useState(new Date().toLocaleString("en-US",{timeZone:"Asia/Karachi"}));
   const fileRef=useRef(null);
   const refImgRef=useRef(null);
   const challengeRefImgRef=useRef(null);
@@ -532,6 +642,16 @@ function App(){
     };
   },[]);
 
+  useEffect(()=>{
+    const tick=()=>{
+      setLocalTime(new Date().toLocaleTimeString());
+      setPkTime(new Date().toLocaleString("en-US",{timeZone:"Asia/Karachi"}));
+    };
+    tick();
+    const intervalId=setInterval(tick,1000);
+    return ()=>clearInterval(intervalId);
+  },[]);
+
   // ===== MEMOIZED COMPUTATIONS =====
   const cousins=useMemo(()=>COUSINS.map(c=>({...c,...(profileOverrides[c.id]||{})})),[profileOverrides]);
   const cousinMap=useMemo(()=>new Map(cousins.map(c=>[c.id,c])),[cousins]);
@@ -539,10 +659,12 @@ function App(){
   const roundScore=v=>Math.round(v);
 
   const viewSubs=useMemo(()=>{
+    const currentMonthKey=Calendar.getMonthKey();
+    const currentWeekKey=Calendar.getWeekKey();
     return subs.filter(s=>{
       const created=new Date(s.created_at||s.createdAt||0);
-      if(leaderboardView==="weekly")return DateUtil.isThisWeek(created);
-      if(leaderboardView==="monthly")return DateUtil.isThisMonth(created);
+      if(leaderboardView==="weekly")return Calendar.getWeekKey(created)===currentWeekKey;
+      if(leaderboardView==="monthly")return Calendar.getMonthKey(created)===currentMonthKey;
       return true;
     });
   },[subs,leaderboardView]);
@@ -555,17 +677,44 @@ function App(){
     const m={};cousins.forEach(c=>{m[c.id]=viewSubs.filter(s=>s.cousin_id===c.id);});return m;
   },[viewSubs,cousins]);
 
-  const lb=useMemo(()=>
-    cousins.map(c=>{
-      const cs=viewSubsByCousin[c.id]||[];
-      const total=roundScore(cs.reduce((a,s)=>a+parseFloat(s.overall_score||0),0));
-      const avg=cs.length?roundScore(total/cs.length):0;
-      return{...c,total,count:cs.length,avg};
-    }).sort((a,b)=>b.total-a.total)
-  ,[viewSubsByCousin,cousins]);
+  const statsByCousin=useMemo(()=>{
+    const map=new Map();
+    cousins.forEach(c=>{
+      map.set(c.id,{...c,score:0,monthly:{},weekly:{}});
+    });
+    subs.forEach(s=>{
+      const cousin=map.get(s.cousin_id);
+      if(!cousin)return;
+      const pts=Math.round(parseFloat(s.overall_score||0)||0);
+      cousin.score+=pts;
+      const created=new Date(s.created_at||s.createdAt||0);
+      const monthKey=Calendar.getMonthKey(created);
+      const weekKey=Calendar.getWeekKey(created);
+      cousin.monthly[monthKey]=(cousin.monthly[monthKey]||0)+pts;
+      cousin.weekly[weekKey]=(cousin.weekly[weekKey]||0)+pts;
+    });
+    return Array.from(map.values());
+  },[subs,cousins]);
+
+  const currentMonthKey=Calendar.getMonthKey();
+  const currentWeekKey=Calendar.getWeekKey();
+
+  const lb=useMemo(()=>{
+    const ranked = leaderboardView==="weekly"
+      ? LeaderboardEngine.getWeekly(statsByCousin,currentWeekKey)
+      : leaderboardView==="monthly"
+        ? LeaderboardEngine.getMonthly(statsByCousin,currentMonthKey)
+        : LeaderboardEngine.getTotal(statsByCousin);
+    return ranked.map(u=>({
+      ...u,
+      total:u.score,
+      count:(viewSubsByCousin[u.id]||[]).length,
+      avg:(viewSubsByCousin[u.id]||[]).length?Math.round(u.score/(viewSubsByCousin[u.id]||[]).length):0
+    }));
+  },[statsByCousin,currentMonthKey,currentWeekKey,leaderboardView,viewSubsByCousin]);
   const deferredLb=useDeferredValue(lb);
 
-  const totalPts=useMemo(()=>roundScore(subs.reduce((a,s)=>a+parseFloat(s.overall_score||0),0)),[subs]);
+  const totalPts=useMemo(()=>roundScore(statsByCousin.reduce((a,c)=>a+c.score,0)),[statsByCousin]);
   const bestSub=useMemo(()=>subs.length?subs.reduce((b,s)=>parseFloat(s.overall_score||0)>parseFloat(b.overall_score||0)?s:b,subs[0]):null,[subs]);
   const funniest=useMemo(()=>subs.filter(s=>s.roast).sort((a,b)=>b.roast.length-a.roast.length)[0]||null,[subs]);
   const mostActive=useMemo(()=>[...lb].sort((a,b)=>b.count-a.count)[0],[lb]);
@@ -685,23 +834,14 @@ const row = {
   },[toast]);
 
   const recordHofWinner=useCallback(async()=>{
-    const now=new Date();
-    const prevStart=DateUtil.prevMonthStart(now);
-    const prevEnd=DateUtil.prevMonthEnd(now);
-    const monthLabel=DateUtil.formatMonthYear(prevStart);
+    const now=Calendar.now();
+    const prevMonthBase=new Date(now.getFullYear(), now.getMonth()-1, 1);
+    const monthKey=Calendar.getMonthKey(prevMonthBase);
+    const monthLabel=Calendar.formatMonthYear(prevMonthBase);
     if(hofRecords.find(r=>r.month===monthLabel))return toast("HOF already recorded for "+monthLabel,"err");
-    const tally={};
-    subs.forEach(s=>{
-      const d=new Date(s.created_at||0);
-      if(d>=prevStart&&d<=prevEnd){
-        tally[s.cousin_id]=(tally[s.cousin_id]||0)+parseFloat(s.overall_score||0);
-      }
-    });
-    const entries=Object.entries(tally).sort((a,b)=>b[1]-a[1]);
-    if(!entries.length)return toast("No submissions found for "+monthLabel,"err");
-    const [winnerId,winnerPts]=entries[0];
-    const winner=getCousin(winnerId);
-    const record={month:monthLabel,cousin_id:winnerId,name:winner?.name||winnerId,emoji:winner?.emoji||"🏆",color:winner?.color||C.gold,pts:Math.round(winnerPts),img:winner?.img||""};
+    const {winner,score}=HOFSystem.getMonthlyWinner(statsByCousin,monthKey);
+    if(!winner)return toast("No submissions found for "+monthLabel,"err");
+    const record={month:monthLabel,month_key:monthKey,cousin_id:winner.id,name:winner?.name||winner.id,emoji:winner?.emoji||"🏆",color:winner?.color||C.gold,pts:score,img:winner?.img||""};
 
     // Try to persist to Supabase; fall back to localStorage on error
     try{
@@ -720,7 +860,7 @@ const row = {
       try{localStorage.setItem("qazi_hof",JSON.stringify(updated));}catch(_){}
       toast("HOF recorded locally (db failed): "+fallback.name+" wins "+monthLabel+" 🏆","err");
     }
-  },[subs,hofRecords,toast]);
+  },[statsByCousin,hofRecords,toast]);
 
   const handleUpload=useCallback((id,action)=>{
     if(action==="intro"){const c=getCousin(id);setEI(id);setET(intros[id]||c.intro);}
@@ -795,10 +935,21 @@ const row = {
         <div className="hero-sub" style={{fontFamily:"'Orbitron',monospace",fontSize:"clamp(10px,1.8vw,16px)",color:"#f59e0b",margin:"0 0 22px",letterSpacing:"clamp(2px,0.5vw,6px)",fontWeight:"400",opacity:0.9}}>⚔️ &nbsp; IMAGE GENERATION BATTLE ARENA &nbsp; ⚔️</div>
 
         {/* Description */}
-        <p className="hero-desc" style={{fontSize:"clamp(13px,1.6vw,16px)",color:"#94a3b8",maxWidth:"480px",margin:"0 auto 40px",lineHeight:2,letterSpacing:"0.2px"}}>
+        <p className="hero-desc" style={{fontSize:"clamp(13px,1.6vw,16px)",color:"#94a3b8",maxWidth:"480px",margin:"0 auto 24px",lineHeight:2,letterSpacing:"0.2px"}}>
           Real-time leaderboard. Groq AI judges every submission.<br/>
           Glory is eternal. Step into the arena. 🏆
         </p>
+
+        <div style={{display:"flex",justifyContent:"center",gap:"12px",flexWrap:"wrap",marginBottom:"32px"}}>
+          <div style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(0,229,255,0.15)",borderRadius:"14px",padding:"12px 16px",minWidth:"160px",textAlign:"center"}}>
+            <div style={{fontSize:"10px",color:"#94a3b8",letterSpacing:"1.5px",textTransform:"uppercase",marginBottom:"6px"}}>Local Time</div>
+            <div style={{fontFamily:"'Orbitron',monospace",fontSize:"18px",color:"#00e5ff"}}>{localTime}</div>
+          </div>
+          <div style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(0,229,255,0.15)",borderRadius:"14px",padding:"12px 16px",minWidth:"220px",textAlign:"center"}}>
+            <div style={{fontSize:"10px",color:"#94a3b8",letterSpacing:"1.5px",textTransform:"uppercase",marginBottom:"6px"}}>Karachi Time</div>
+            <div style={{fontFamily:"'Orbitron',monospace",fontSize:"16px",color:"#f59e0b"}}>{pkTime}</div>
+          </div>
+        </div>
 
         {/* Stats row */}
         <div className="hero-stats hero-stats-grid" style={{display:"flex",justifyContent:"center",gap:"12px",flexWrap:"wrap"}}>
