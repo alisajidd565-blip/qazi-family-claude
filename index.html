@@ -221,6 +221,42 @@ async function dbDeleteSubmission(id){
   if(error)throw error;
 }
 
+async function dbFetchSettings(){
+  const{data,error}=await sb.from("qazi_settings").select("*");
+  if(error)return{};
+  const m={};(data||[]).forEach(r=>{m[r.key]=r.value;});return m;
+}
+async function dbSetSetting(key,value){
+  const{error}=await sb.from("qazi_settings").upsert({key,value,updated_at:new Date().toISOString()});
+  if(error)throw error;
+}
+async function dbUpdateChallenge(id,updates){
+  const{error}=await sb.from("qazi_challenges").update(updates).eq("id",id);
+  if(error)throw error;
+}
+async function dbDeleteChallengeDB(id){
+  const{error}=await sb.from("qazi_challenges").delete().eq("id",id);
+  if(error)throw error;
+}
+async function dbFetchProfiles(){
+  const{data,error}=await sb.from("qazi_profiles").select("*");
+  if(error)return{};
+  const m={};(data||[]).forEach(r=>{m[r.cousin_id]={image_url:r.image_url,emoji:r.emoji};});return m;
+}
+async function dbUpsertProfile(cousin_id,data){
+  const{error}=await sb.from("qazi_profiles").upsert({cousin_id,...data,updated_at:new Date().toISOString()});
+  if(error)throw error;
+}
+async function dbFetchMonthlyWinners(){
+  const{data,error}=await sb.from("qazi_monthly_winners").select("*").order("year",{ascending:false}).order("month",{ascending:false});
+  if(error)return[];
+  return data||[];
+}
+async function dbSaveMonthlyWinner(row){
+  const{error}=await sb.from("qazi_monthly_winners").upsert(row,{onConflict:"month,year"});
+  if(error)throw error;
+}
+
 // ===== CLOUDINARY UPLOAD =====
 async function uploadToCloudinary(file){
   const fd=new FormData();
@@ -286,59 +322,54 @@ Reply ONLY with valid JSON, no extra text:
 const{useState,useEffect,useRef,useMemo,useCallback,memo,startTransition,useTransition,useDeferredValue}=React;
 
 // ===== COUSIN CARD (memoized) =====
-const CousinCard=memo(function CousinCard({cousin,rank,subs,adminMode,onGallery,onUpload,onView,customIntro}){
-  const total=parseFloat(subs.reduce((a,s)=>a+parseFloat(s.overall_score||0),0).toFixed(1));
-  const avg=subs.length?(total/subs.length).toFixed(1):"—";
+const CousinCard=memo(function CousinCard({cousin,rank,subs,adminMode,onGallery,onUpload,onView,customIntro,customImg,customEmoji,onEditProfile}){
+  const total=subs.reduce((a,s)=>a+(s.overall_score||0),0);
+  const avg=subs.length?Math.round(total/subs.length):"—";
   const latest=subs[subs.length-1];
   const intro=customIntro||cousin.intro;
+  const imgSrc=customImg||cousin.img;
+  const emoji=customEmoji||cousin.emoji;
   const st=CST[cousin.id];
   return(
-    <div className="cc" style={{...CARD,...st.card,overflow:"hidden",position:"relative",borderRadius:"18px"}}>
+    <div className="cc" style={{...CARD,...st.card,overflow:"hidden",position:"relative"}}>
       <div style={st.bar}/>
-      <div style={{position:"absolute",top:"12px",right:"12px",background:rank<=3?cousin.color+"22":"rgba(255,255,255,0.05)",border:"1px solid "+cousin.color+(rank<=3?"55":"22"),borderRadius:"20px",padding:"3px 10px",fontFamily:OF,fontSize:rank<=3?"15px":"12px",color:rank<=3?cousin.color:C.muted,backdropFilter:"blur(8px)"}}>{medal(rank)}</div>
-      <div style={{padding:"20px"}}>
-        <div style={{display:"flex",gap:"14px",marginBottom:"16px",alignItems:"flex-start"}}>
+      <div style={{position:"absolute",top:"14px",right:"14px",background:rank<=3?cousin.color+"22":"rgba(255,255,255,0.05)",border:"1px solid "+cousin.color+"44",borderRadius:"20px",padding:"3px 10px",fontFamily:OF,fontSize:rank<=3?"16px":"13px",color:rank<=3?cousin.color:C.muted}}>{medal(rank)}</div>
+      <div style={{padding:"22px"}}>
+        <div style={{display:"flex",gap:"14px",marginBottom:"18px",alignItems:"flex-start"}}>
           <div style={{position:"relative",flexShrink:0}}>
-            <div style={{borderRadius:"50%",padding:"2px",background:"linear-gradient(135deg,"+cousin.color+"88,transparent)",boxShadow:"0 0 16px "+cousin.color+"33"}}>
-              <img src={cousin.img} alt={cousin.name} style={{...st.img,border:"none",boxShadow:"none"}} loading="lazy"/>
-            </div>
-            <span style={{position:"absolute",bottom:"-2px",right:"-2px",fontSize:"15px",background:C.bg,borderRadius:"50%",width:"22px",height:"22px",display:"flex",alignItems:"center",justifyContent:"center",border:"1px solid "+cousin.color+"33"}}>{cousin.emoji}</span>
+            <img src={imgSrc} alt={cousin.name} style={st.img} loading="lazy"/>
+            <span style={{position:"absolute",bottom:"-3px",right:"-3px",fontSize:"17px",background:C.bg,borderRadius:"50%",width:"24px",height:"24px",display:"flex",alignItems:"center",justifyContent:"center"}}>{emoji}</span>
+            {adminMode&&<button onClick={()=>onEditProfile(cousin.id)} style={{position:"absolute",top:"-4px",left:"-4px",background:"rgba(245,158,11,0.9)",border:"none",borderRadius:"50%",width:"20px",height:"20px",cursor:"pointer",fontSize:"10px",display:"flex",alignItems:"center",justifyContent:"center",padding:0}}>✏️</button>}
           </div>
           <div style={{flex:1,minWidth:0}}>
             <h3 style={st.name}>{cousin.name}</h3>
-            <div style={{fontSize:"9px",color:C.muted,marginBottom:"6px",letterSpacing:"1.5px",fontFamily:OF}}>{cousin.title}</div>
-            <p style={{fontSize:"11px",color:"#94a3b8",margin:0,lineHeight:"1.65",fontStyle:"italic"}}>"{intro}"</p>
-            {adminMode&&<button onClick={()=>onUpload(cousin.id,"intro")} style={{background:"rgba(100,116,139,0.1)",border:"1px solid rgba(100,116,139,0.25)",color:C.muted,borderRadius:"6px",padding:"3px 8px",fontSize:"9px",marginTop:"6px",cursor:"pointer",transition:"border-color 0.15s"}}
-              onMouseEnter={e=>e.currentTarget.style.borderColor="rgba(100,116,139,0.5)"}
-              onMouseLeave={e=>e.currentTarget.style.borderColor="rgba(100,116,139,0.25)"}>✏️ Edit Intro</button>}
+            <div style={{fontSize:"10px",color:C.muted,marginBottom:"7px",letterSpacing:"1px"}}>{cousin.title}</div>
+            <p style={{fontSize:"12px",color:"#94a3b8",margin:0,lineHeight:"1.6",fontStyle:"italic"}}>"{intro}"</p>
+            {adminMode&&<button onClick={()=>onUpload(cousin.id,"intro")} style={{background:"rgba(100,116,139,0.12)",border:"1px solid rgba(100,116,139,0.3)",color:C.muted,borderRadius:"6px",padding:"3px 8px",fontSize:"10px",marginTop:"6px",cursor:"pointer"}}>✏️ Edit Intro</button>}
           </div>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"6px",marginBottom:"12px"}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"7px",marginBottom:"14px"}}>
           {[["⭐","TOTAL",total],["🎮","GAMES",subs.length],["📊","AVG",avg]].map(([ic,lbl,val])=>(
-            <div key={lbl} className="stat-mini" style={{background:"rgba(255,255,255,0.025)",borderRadius:"8px",padding:"8px 6px",textAlign:"center",...st.sb}}>
-              <div style={{fontSize:"13px"}}>{ic}</div>
-              <div style={{color:cousin.color,fontSize:"16px",fontWeight:"700",fontFamily:OF,lineHeight:1.1,marginTop:"2px"}}>{val}</div>
-              <div style={{fontSize:"8px",color:C.muted,letterSpacing:"1px",marginTop:"2px"}}>{lbl}</div>
+            <div key={lbl} style={{background:"rgba(255,255,255,0.03)",borderRadius:"7px",padding:"8px",textAlign:"center",...st.sb}}>
+              <div style={{fontSize:"14px"}}>{ic}</div>
+              <div style={{color:cousin.color,fontSize:"17px",fontWeight:"700",fontFamily:OF}}>{val}</div>
+              <div style={{fontSize:"9px",color:C.muted,letterSpacing:"1px"}}>{lbl}</div>
             </div>
           ))}
         </div>
         {latest&&(
-          <div style={{marginBottom:"12px"}}>
-            <div style={{fontSize:"9px",color:C.muted,marginBottom:"6px",letterSpacing:"1.5px",fontFamily:OF}}>LATEST SUBMISSION</div>
-            <div className="gal-card" style={{...st.lb,borderRadius:"10px"}} onClick={()=>onView(latest)}>
-              <img src={clUrl(latest.image_url,"w_400,h_220,c_fill")} alt="Latest" style={{width:"100%",height:"110px",objectFit:"cover",display:"block"}} loading="lazy"/>
-              <div style={{position:"absolute",bottom:"7px",right:"7px",background:"rgba(0,0,0,0.88)",borderRadius:"6px",padding:"3px 8px",fontSize:"11px",color:C.gold,fontFamily:OF,backdropFilter:"blur(4px)"}}>{latest.overall_score}/10</div>
+          <div style={{marginBottom:"14px"}}>
+            <div style={{fontSize:"10px",color:C.muted,marginBottom:"6px",letterSpacing:"1px"}}>LATEST SUBMISSION</div>
+            <div style={st.lb} onClick={()=>onView(latest)}>
+              <img src={latest.image_url} alt="Latest" style={{width:"100%",height:"110px",objectFit:"cover",display:"block"}} loading="lazy"/>
+              <div style={{position:"absolute",bottom:"7px",right:"7px",background:"rgba(0,0,0,0.85)",borderRadius:"6px",padding:"3px 8px",fontSize:"12px",color:C.gold,fontFamily:OF}}>{latest.overall_score}/10</div>
             </div>
           </div>
         )}
         <div style={{display:"flex",gap:"7px"}}>
-          {subs.length>0&&<button style={{...st.gb,borderRadius:"8px",padding:"9px 14px",transition:"opacity 0.15s,transform 0.15s",fontSize:"11px"}} onClick={()=>onGallery(cousin.id)}
-            onMouseEnter={e=>{e.currentTarget.style.opacity="0.8";e.currentTarget.style.transform="translateY(-1px)";}}
-            onMouseLeave={e=>{e.currentTarget.style.opacity="1";e.currentTarget.style.transform="translateY(0)";}}>🖼️ Gallery ({subs.length})</button>}
-          {adminMode&&<button style={{background:"rgba(245,158,11,0.12)",border:"1px solid rgba(245,158,11,0.35)",color:C.gold,borderRadius:"8px",padding:"9px 14px",cursor:"pointer",fontSize:"11px",flex:1,fontFamily:"'Exo 2',sans-serif",transition:"opacity 0.15s,transform 0.15s"}} onClick={()=>onUpload(cousin.id,"image")}
-            onMouseEnter={e=>{e.currentTarget.style.opacity="0.8";e.currentTarget.style.transform="translateY(-1px)";}}
-            onMouseLeave={e=>{e.currentTarget.style.opacity="1";e.currentTarget.style.transform="translateY(0)";}}>📤 Upload</button>}
-          {!adminMode&&subs.length===0&&<div style={{flex:1,textAlign:"center",fontSize:"11px",color:C.muted,padding:"9px",opacity:0.6}}>No submissions yet</div>}
+          {subs.length>0&&<button style={st.gb} onClick={()=>onGallery(cousin.id)}>🖼️ Gallery ({subs.length})</button>}
+          {adminMode&&<button style={{background:"rgba(245,158,11,0.15)",border:"1px solid rgba(245,158,11,0.4)",color:C.gold,borderRadius:"8px",padding:"8px 16px",cursor:"pointer",fontSize:"11px",flex:1,fontFamily:"'Exo 2',sans-serif"}} onClick={()=>onUpload(cousin.id,"image")}>📤 Upload</button>}
+          {!adminMode&&subs.length===0&&<div style={{flex:1,textAlign:"center",fontSize:"11px",color:C.muted,padding:"8px"}}>No submissions yet</div>}
         </div>
       </div>
     </div>
@@ -372,62 +403,141 @@ function App(){
   const[editTxt,setET]=useState("");
   const[newRefImg,setNRI]=useState(null);
   const[newRefFile,setNRF]=useState(null);
+  const[settings,setSettings]=useState({});
+const[profiles,setProfiles]=useState({});
+const[monthlyWinners,setMonthlyWinners]=useState([]);
+const[lbView,setLbView]=useState("total");
+const[showCM,setShowCM]=useState(false);
+const[editingChall,setEC]=useState(null);
+const[showProfileEditor,setSPE]=useState(null);
+const[profileImg,setPImg]=useState(null);
+const[profileImgFile,setPImgFile]=useState(null);
+const[profileEmoji,setPEmoji]=useState("");
+const profImgRef=useRef(null);
   const fileRef=useRef(null);
   const refImgRef=useRef(null);
   const ntRef=useRef(null);
   // Debounce refs for realtime — avoids polluting window scope
   const rtRef=useRef({});
 
-  const chall=challenges[challenges.length-1];
+ const chall=useMemo(()=>{
+  if(settings.active_challenge_id){
+    const f=challenges.find(c=>String(c.id)===String(settings.active_challenge_id));
+    if(f)return f;
+  }
+  return challenges[challenges.length-1];
+},[challenges,settings.active_challenge_id]);
 
   // ===== LOAD DATA =====
   useEffect(()=>{
     const init=async()=>{
       try{
-        const[s,c,i]=await Promise.all([dbFetchSubmissions(),dbFetchChallenges(),dbFetchIntros()]);
+        const[s,c,i,st,pr,mw]=await Promise.all([
+  dbFetchSubmissions(),dbFetchChallenges(),dbFetchIntros(),
+  dbFetchSettings(),dbFetchProfiles(),dbFetchMonthlyWinners()
+]);
         setSubs(s);
         if(c.length>0)setChalls(c); else setChalls([DEFAULT_CHALL]);
-        setIntros(i);
+        setIntros(i);setSettings(st);setProfiles(pr);setMonthlyWinners(mw);
       }catch(e){toast("DB load error: "+e.message,"err");}
       setLoading(false);
     };
     init();
 
     // Real-time subscription
-    const ch=sb.channel("qazi_rt")
-      .on("postgres_changes",{event:"*",schema:"public",table:"qazi_submissions"},()=>{
-        clearTimeout(rtRef.current.subs);rtRef.current.subs=setTimeout(()=>dbFetchSubmissions().then(d=>startTransition(()=>setSubs(d))).catch(()=>{}),400);
-      })
-      .on("postgres_changes",{event:"*",schema:"public",table:"qazi_challenges"},()=>{
-        clearTimeout(rtRef.current.chall);rtRef.current.chall=setTimeout(()=>dbFetchChallenges().then(d=>startTransition(()=>{if(d.length>0)setChalls(d);})).catch(()=>{}),400);
-      })
-      .on("postgres_changes",{event:"*",schema:"public",table:"qazi_intros"},()=>{
-        clearTimeout(rtRef.current.intros);rtRef.current.intros=setTimeout(()=>dbFetchIntros().then(d=>startTransition(()=>setIntros(d))).catch(()=>{}),400);
-      })
-      .subscribe();
+    const subscribeTable = (
+  ch,
+  table,
+  callback
+) => {
+  ch.on(
+    "postgres_changes",
+    { event: "*", schema: "public", table },
+    callback
+  );
+};
 
-    return()=>{
-      sb.removeChannel(ch);
-      // cleanup all debounce timers on unmount
-      clearTimeout(rtRef.current.subs);
-      clearTimeout(rtRef.current.chall);
-      clearTimeout(rtRef.current.intros);
-    };
-  },[]);
+const ch = sb.channel("qazi_rt");
+
+subscribeTable(ch, "qazi_submissions", () => {
+  clearTimeout(rtRef.current.subs);
+  rtRef.current.subs = setTimeout(
+    () =>
+      dbFetchSubmissions()
+        .then((d) => startTransition(() => setSubs(d)))
+        .catch(() => {}),
+    400
+  );
+});
+
+subscribeTable(ch, "qazi_challenges", () => {
+  clearTimeout(rtRef.current.chall);
+  rtRef.current.chall = setTimeout(
+    () =>
+      dbFetchChallenges()
+        .then((d) =>
+          startTransition(() => {
+            if (d.length > 0) setChalls(d);
+          })
+        )
+        .catch(() => {}),
+    400
+  );
+});
+
+subscribeTable(ch, "qazi_intros", () => {
+  dbFetchIntros().then(setIntros).catch(() => {});
+});
+
+subscribeTable(ch, "qazi_settings", () => {
+  dbFetchSettings().then(setSettings).catch(() => {});
+});
+
+subscribeTable(ch, "qazi_profiles", () => {
+  dbFetchProfiles().then(setProfiles).catch(() => {});
+});
+
+subscribeTable(ch, "qazi_monthly_winners", () => {
+  dbFetchMonthlyWinners().then(setMonthlyWinners).catch(() => {});
+});
+
+ch.subscribe();
+
+return () => {
+  sb.removeChannel(ch);
+
+  // cleanup all debounce timers on unmount
+  clearTimeout(rtRef.current.subs);
+  clearTimeout(rtRef.current.chall);
+  clearTimeout(rtRef.current.intros);
+};
 
   // ===== MEMOIZED COMPUTATIONS =====
   const subsByCousin=useMemo(()=>{
     const m={};COUSINS.forEach(c=>{m[c.id]=subs.filter(s=>s.cousin_id===c.id);});return m;
   },[subs]);
 
-  const lb=useMemo(()=>
-    COUSINS.map(c=>{
-      const cs=subsByCousin[c.id]||[];
-      const total=parseFloat(cs.reduce((a,s)=>a+parseFloat(s.overall_score||0),0).toFixed(1));
-      const avg=cs.length?parseFloat((total/cs.length).toFixed(1)):0;
-      return{...c,total,count:cs.length,avg};
-    }).sort((a,b)=>b.total-a.total)
-  ,[subsByCousin]);
+ const lb=useMemo(()=>
+  COUSINS.map(c=>{
+    const cs=subs.filter(s=>s.cousin_id===c.id);
+    const total=cs.reduce((a,s)=>a+(s.overall_score||0),0);
+    return{...c,total,count:cs.length,avg:cs.length?Math.round(total/cs.length):0};
+  }).sort((a,b)=>b.total-a.total)
+,[subs]);
+
+const lbFiltered=useMemo(()=>{
+  const now=new Date();
+  const weekAgo=new Date(now-7*24*60*60*1000);
+  const monthStart=new Date(now.getFullYear(),now.getMonth(),1);
+  let filtered=subs;
+  if(lbView==="weekly")filtered=subs.filter(s=>new Date(s.created_at)>=weekAgo);
+  if(lbView==="monthly")filtered=subs.filter(s=>new Date(s.created_at)>=monthStart);
+  return COUSINS.map(c=>{
+    const cs=filtered.filter(s=>s.cousin_id===c.id);
+    const total=cs.reduce((a,s)=>a+(s.overall_score||0),0);
+    return{...c,total,count:cs.length,avg:cs.length?Math.round(total/cs.length):0};
+  }).sort((a,b)=>b.total-a.total);
+},[subs,lbView]);
   const deferredLb=useDeferredValue(lb);
 
   const totalPts=useMemo(()=>parseFloat(subs.reduce((a,s)=>a+parseFloat(s.overall_score||0),0).toFixed(1)),[subs]);
@@ -534,7 +644,71 @@ const row = {
       setViewSub(null);toast("Deleted");
     }catch(e){toast("Error: "+e.message,"err");}
   },[toast]);
+const setActiveChallengeId=useCallback(async(id)=>{
+  try{await dbSetSetting("active_challenge_id",String(id));toast("Challenge set active ✅");}
+  catch(e){toast("Error: "+e.message,"err");}
+},[]);
 
+const saveEditChallenge=useCallback(async()=>{
+  if(!editingChall)return;
+  try{
+    await dbUpdateChallenge(editingChall.id,{prompt:editingChall.prompt,difficulty:editingChall.difficulty});
+    const updated=await dbFetchChallenges();if(updated.length>0)setChalls(updated);
+    setEC(null);toast("Challenge updated ✅");
+  }catch(e){toast("Error: "+e.message,"err");}
+},[editingChall]);
+
+const deleteChallengeAction=useCallback(async(id)=>{
+  if(!window.confirm("Delete this challenge?"))return;
+  try{
+    await dbDeleteChallengeDB(id);
+    const updated=await dbFetchChallenges();
+    if(updated.length>0)setChalls(updated);else setChalls([DEFAULT_CHALL]);
+    toast("Deleted");
+  }catch(e){toast("Error: "+e.message,"err");}
+},[]);
+
+const openProfileEditor=useCallback((id)=>{
+  const p=profiles[id];
+  setSPE(id);
+  setPEmoji(p?.emoji||getCousin(id)?.emoji||"");
+  setPImg(p?.image_url||null);
+  setPImgFile(null);
+},[profiles]);
+
+const handleProfileImgFile=useCallback(e=>{
+  const f=e.target.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=ev=>{setPImg(ev.target.result);setPImgFile(f);};
+  r.readAsDataURL(f);e.target.value="";
+},[]);
+
+const saveProfile=useCallback(async()=>{
+  if(!showProfileEditor)return;
+  try{
+    let image_url=profiles[showProfileEditor]?.image_url||null;
+    if(profileImgFile){setStatus("📤 Uploading...");image_url=await uploadToCloudinary(profileImgFile);}
+    await dbUpsertProfile(showProfileEditor,{image_url,emoji:profileEmoji||null});
+    setSPE(null);setPImg(null);setPImgFile(null);setStatus("");
+    toast("Profile updated ✨");
+  }catch(e){toast("Error: "+e.message,"err");setStatus("");}
+},[showProfileEditor,profileImgFile,profileEmoji,profiles]);
+
+const declareMonthlyWinner=useCallback(async()=>{
+  const now=new Date();
+  const month=now.getMonth()+1,year=now.getFullYear();
+  const monthStart=new Date(year,month-1,1),monthEnd=new Date(year,month,1);
+  const ms=subs.filter(s=>{const d=new Date(s.created_at);return d>=monthStart&&d<monthEnd;});
+  if(!ms.length){toast("No submissions this month","err");return;}
+  const scores={};
+  COUSINS.forEach(c=>{scores[c.id]=ms.filter(s=>s.cousin_id===c.id).reduce((a,s)=>a+(s.overall_score||0),0);});
+  const wid=Object.keys(scores).reduce((a,b)=>scores[a]>scores[b]?a:b);
+  try{
+    await dbSaveMonthlyWinner({month,year,cousin_id:wid,total_score:scores[wid],submission_count:ms.filter(s=>s.cousin_id===wid).length});
+    dbFetchMonthlyWinners().then(setMonthlyWinners);
+    toast(`👑 ${getCousin(wid)?.name} crowned for ${now.toLocaleString("default",{month:"long"})}!`);
+  }catch(e){toast("Error: "+e.message,"err");}
+},[subs]);
   const handleUpload=useCallback((id,action)=>{
     if(action==="intro"){const c=getCousin(id);setEI(id);setET(intros[id]||c.intro);}
     else{setUF(id);setPrev(null);setRF(null);setJE("");setStatus("");}
@@ -651,7 +825,12 @@ const row = {
               </div>
             </div>
           )}
-          {adminMode&&<button className="pb" onClick={()=>setSCE(true)} style={PBTN}>+ New Challenge</button>}
+          {adminMode&&(
+  <div style={{display:"flex",gap:"10px",justifyContent:"center",flexWrap:"wrap"}}>
+    <button className="pb" onClick={()=>setSCE(true)} style={PBTN}>+ New Challenge</button>
+    <button className="pb" onClick={()=>setShowCM(true)} style={{...PBTN,background:"linear-gradient(135deg,rgba(168,85,247,0.2),rgba(0,229,255,0.2))"}}>⚙️ Manage Challenges</button>
+  </div>
+)}
         </div>
       </section>
 
@@ -659,57 +838,60 @@ const row = {
         <h2 style={{fontFamily:OF,color:C.cyan,textShadow:"0 0 16px "+C.cyan,fontSize:"20px",textAlign:"center",marginBottom:"28px",letterSpacing:"3px"}}>⚔️ THE COMPETITORS</h2>
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(min(100%,300px),1fr))",gap:"16px"}}>
           {COUSINS.map(cousin=>(
-            <CousinCard key={cousin.id} cousin={cousin} rank={rankMap[cousin.id]||7} subs={subsByCousin[cousin.id]} adminMode={adminMode} onGallery={setGallery} onUpload={handleUpload} onView={setViewSub} customIntro={intros[cousin.id]}/>
+           <CousinCard key={cousin.id} cousin={cousin} rank={lb.findIndex(l=>l.id===cousin.id)+1} subs={subsByCousin[cousin.id]} adminMode={adminMode} onGallery={setGallery} onUpload={handleUpload} onView={setViewSub} customIntro={intros[cousin.id]} customImg={profiles[cousin.id]?.image_url} customEmoji={profiles[cousin.id]?.emoji} onEditProfile={openProfileEditor}/>
           ))}
         </div>
       </section>
     </div>}
 
-    {tab==="leaderboard"&&<div style={{padding:"36px 16px 80px",maxWidth:"820px",margin:"0 auto"}}>
-      <h2 style={{fontFamily:OF,color:C.cyan,textShadow:"0 0 16px rgba(0,229,255,0.6)",fontSize:"clamp(18px,4vw,24px)",textAlign:"center",marginBottom:"36px",letterSpacing:"4px"}}>🏆 LEADERBOARD</h2>
-      <div style={{display:"flex",justifyContent:"center",gap:"clamp(8px,2vw,16px)",marginBottom:"44px",alignItems:"flex-end",flexWrap:"wrap"}}>
-        {deferredLb.slice(0,3).map((c,i)=>{
-          const visOrder=[1,0,2];
-          const podiumH=["220px","178px","155px"];
-          const medals=["🥇","🥈","🥉"];
-          const colors=[C.gold,C.muted,"#cd7f32"];
-          const col=colors[i];
-          const imgSz=i===0?"90px":"72px";
-          return(
-            <div key={c.id} style={{order:visOrder[i],textAlign:"center",minWidth:"clamp(100px,22vw,130px)"}}>
-              <div style={{position:"relative",display:"inline-block",marginBottom:"8px"}}>
-                <img src={c.img} alt={c.name} loading="lazy" style={{width:imgSz,height:imgSz,borderRadius:"50%",objectFit:"cover",border:"3px solid "+col,boxShadow:"0 0 24px "+col+"55",display:"block",transition:"transform 0.25s"}}
-                  onMouseEnter={e=>e.currentTarget.style.transform="scale(1.06)"}
-                  onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}/>
-                <div style={{position:"absolute",bottom:"-2px",right:"-2px",background:"rgba(6,10,20,0.9)",borderRadius:"50%",width:"26px",height:"26px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"14px",border:"1px solid "+col+"44"}}>{medals[i]}</div>
-              </div>
-              <div style={{color:col,fontFamily:OF,fontSize:"11px",fontWeight:"700",marginBottom:"6px"}}>{c.name.split(" ")[0]}</div>
-              <div style={{background:"linear-gradient(180deg,"+col+"18,"+col+"0a)",border:"1px solid "+col+"33",borderRadius:"12px",height:podiumH[i],display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",paddingTop:"18px",backdropFilter:"blur(8px)"}}>
-                <div style={{fontSize:"clamp(20px,4vw,26px)",fontWeight:"900",color:col,fontFamily:OF,textShadow:"0 0 16px "+col+"88"}}>{c.total}</div>
-                <div style={{fontSize:"9px",color:C.muted,letterSpacing:"1.5px",fontFamily:OF,marginTop:"2px"}}>POINTS</div>
-                <div style={{fontSize:"11px",color:C.muted,marginTop:"6px"}}>{c.count} game{c.count!==1?"s":""}</div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
-        {deferredLb.map((c,i)=>(
-          <div key={c.id} className="lb-row" style={{...CARD,padding:"12px 16px",display:"flex",alignItems:"center",gap:"12px",border:"1px solid "+(i<3?c.color+"44":"rgba(0,229,255,0.12)"),borderRadius:"12px"}}>
-            <div style={{width:"34px",height:"34px",borderRadius:"50%",background:i===0?"rgba(245,158,11,0.15)":i===1?"rgba(100,116,139,0.12)":i===2?"rgba(205,127,50,0.12)":"rgba(255,255,255,0.04)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:OF,fontSize:i<3?"15px":"11px",color:i===0?C.gold:i===1?C.muted:i===2?"#cd7f32":C.muted,flexShrink:0,border:"1px solid "+(i<3?[C.gold,C.muted,"#cd7f32"][i]:"rgba(255,255,255,0.08)")+"44"}}>{medal(i+1)}</div>
-            <img src={c.img} alt={c.name} loading="lazy" style={{width:"38px",height:"38px",borderRadius:"50%",objectFit:"cover",border:"2px solid "+c.color+"55",flexShrink:0}}/>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontWeight:"700",color:c.color,fontFamily:OF,fontSize:"12px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{c.name}</div>
-              <div style={{fontSize:"10px",color:C.muted,marginTop:"1px"}}>{c.count} submission{c.count!==1?"s":""} · avg {c.avg}</div>
-            </div>
-            <div style={{textAlign:"right",flexShrink:0}}>
-              <div style={{fontSize:"clamp(17px,3vw,22px)",fontWeight:"900",color:C.cyan,fontFamily:OF}}>{c.total}</div>
-              <div style={{fontSize:"8px",color:C.muted,letterSpacing:"1px"}}>PTS</div>
+   {tab==="leaderboard"&&<div style={{padding:"36px 20px 80px",maxWidth:"820px",margin:"0 auto"}}>
+  <h2 style={{fontFamily:OF,color:C.cyan,textShadow:"0 0 16px "+C.cyan,fontSize:"24px",textAlign:"center",marginBottom:"16px",letterSpacing:"4px"}}>🏆 LEADERBOARD</h2>
+  <div style={{display:"flex",justifyContent:"center",gap:"7px",marginBottom:"28px",flexWrap:"wrap",alignItems:"center"}}>
+    {[["total","🌍 ALL TIME"],["monthly","📅 THIS MONTH"],["weekly","📆 THIS WEEK"]].map(([v,lbl])=>(
+      <button key={v} className={"tab-btn"+(lbView===v?" active":"")} onClick={()=>setLbView(v)}>{lbl}</button>
+    ))}
+    {adminMode&&lbView==="monthly"&&<button onClick={declareMonthlyWinner} style={{background:"rgba(245,158,11,0.15)",border:"1px solid rgba(245,158,11,0.5)",color:C.gold,borderRadius:"7px",padding:"5px 14px",cursor:"pointer",fontSize:"11px",fontFamily:OF,letterSpacing:"1px"}}>👑 DECLARE WINNER</button>}
+  </div>
+  {lbFiltered.filter(c=>c.total>0).length===0&&(
+    <div style={{textAlign:"center",padding:"40px",color:C.muted,fontSize:"14px"}}>No submissions for this period yet.</div>
+  )}
+  {lbFiltered.filter(c=>c.total>0).length>0&&(
+    <div style={{display:"flex",justifyContent:"center",gap:"14px",marginBottom:"40px",alignItems:"flex-end",flexWrap:"wrap"}}>
+      {lbFiltered.slice(0,3).map((c,i)=>{
+        if(c.total===0)return null;
+        const ph=["175px","215px","150px"],po=[1,0,2],md2=["🥈","🥇","🥉"],mc=[C.muted,C.gold,"#cd7f32"];
+        return(
+          <div key={c.id} style={{order:po[i],textAlign:"center",minWidth:"125px"}}>
+            <img src={profiles[c.id]?.image_url||c.img} alt={c.name} loading="lazy" style={{width:i===0?"80px":"66px",height:i===0?"80px":"66px",borderRadius:"50%",objectFit:"cover",border:"3px solid "+mc[i],boxShadow:"0 0 20px "+mc[i]+"55",marginBottom:"8px"}}/>
+            <div style={{fontSize:"24px"}}>{md2[i]}</div>
+            <div style={{color:mc[i],fontFamily:OF,fontSize:"12px",fontWeight:"700",marginBottom:"4px"}}>{c.name.split(" ")[0]}</div>
+            <div style={{background:mc[i]+"22",border:"1px solid "+mc[i]+"44",borderRadius:"12px",height:ph[i],display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-start",paddingTop:"16px"}}>
+              <div style={{fontSize:"24px",fontWeight:"900",color:mc[i],fontFamily:OF}}>{c.total}</div>
+              <div style={{fontSize:"10px",color:C.muted,letterSpacing:"1px"}}>POINTS</div>
+              <div style={{fontSize:"11px",color:C.muted,marginTop:"4px"}}>{c.count} games</div>
             </div>
           </div>
-        ))}
+        );
+      })}
+    </div>
+  )}
+  <div style={{display:"flex",flexDirection:"column",gap:"9px"}}>
+    {lbFiltered.map((c,i)=>(
+      <div key={c.id} style={{...CARD,padding:"14px 18px",display:"flex",alignItems:"center",gap:"14px",border:"1px solid "+(i<3&&c.total>0?c.color+"44":"rgba(0,229,255,0.15)")}}>
+        <div style={{width:"36px",height:"36px",borderRadius:"50%",background:i===0?"rgba(245,158,11,0.15)":i===1?"rgba(100,116,139,0.15)":"rgba(255,255,255,0.05)",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:OF,fontSize:i<3?"16px":"12px",color:i===0?C.gold:i===1?C.muted:i===2?"#cd7f32":C.muted,flexShrink:0}}>{c.total>0?medal(i+1):"—"}</div>
+        <img src={profiles[c.id]?.image_url||c.img} alt={c.name} loading="lazy" style={{width:"40px",height:"40px",borderRadius:"50%",objectFit:"cover",border:"2px solid "+c.color+"66",flexShrink:0}}/>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:"700",color:c.color,fontFamily:OF,fontSize:"13px"}}>{c.name}</div>
+          <div style={{fontSize:"11px",color:C.muted}}>{c.count} submission{c.count!==1?"s":""} · avg {c.avg||"—"}</div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontSize:"21px",fontWeight:"900",color:c.total>0?C.cyan:C.muted,fontFamily:OF}}>{c.total}</div>
+          <div style={{fontSize:"9px",color:C.muted}}>PTS</div>
+        </div>
       </div>
-    </div>}
+    ))}
+  </div>
+</div>}
 
     {tab==="hof"&&<div style={{padding:"36px 16px 80px",maxWidth:"880px",margin:"0 auto"}}>
       <h2 style={{fontFamily:OF,color:C.cyan,textShadow:"0 0 16px rgba(0,229,255,0.6)",fontSize:"clamp(18px,4vw,24px)",textAlign:"center",marginBottom:"32px",letterSpacing:"4px"}}>⭐ HALL OF FAME</h2>
@@ -728,6 +910,27 @@ const row = {
           </div>
         ))}
       </div>
+{monthlyWinners.length>0&&(
+  <div style={{...CARD,padding:"22px",border:"1px solid rgba(245,158,11,0.25)",marginBottom:"24px"}}>
+    <h3 style={{fontFamily:OF,color:C.gold,margin:"0 0 16px",fontSize:"13px",letterSpacing:"2px"}}>👑 MONTHLY CHAMPION WALL</h3>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(155px,1fr))",gap:"12px"}}>
+      {monthlyWinners.map(w=>{
+        const c=getCousin(w.cousin_id);
+        const imgSrc=profiles[w.cousin_id]?.image_url||c?.img;
+        const mn=new Date(w.year,w.month-1).toLocaleString("default",{month:"long"});
+        return(
+          <div key={w.id||`${w.month}-${w.year}`} style={{background:"rgba(245,158,11,0.06)",borderRadius:"10px",padding:"14px",border:"1px solid rgba(245,158,11,0.3)",textAlign:"center"}}>
+            <div style={{fontSize:"22px",marginBottom:"6px"}}>👑</div>
+            <img src={imgSrc} alt={c?.name} loading="lazy" style={{width:"52px",height:"52px",borderRadius:"50%",objectFit:"cover",border:"2px solid "+C.gold+"66",marginBottom:"8px"}}/>
+            <div style={{color:C.gold,fontFamily:OF,fontSize:"12px",fontWeight:"700"}}>{c?.name?.split(" ")[0]}</div>
+            <div style={{color:C.muted,fontSize:"10px",marginTop:"3px"}}>{mn} {w.year}</div>
+            <div style={{color:C.cyan,fontFamily:OF,fontSize:"16px",fontWeight:"900",marginTop:"5px"}}>{w.total_score} pts</div>
+          </div>
+        );
+      })}
+    </div>
+  </div>
+)}
       <div style={{...CARD,padding:"22px",border:"1px solid rgba(0,229,255,0.12)",borderRadius:"16px"}}>
         <h3 style={{fontFamily:OF,color:C.cyan,margin:"0 0 16px",fontSize:"11px",letterSpacing:"2px"}}>📋 CHALLENGE HISTORY</h3>
         <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
@@ -914,7 +1117,53 @@ const row = {
       </div>
     </div>
   </div>}
-
+{showCM&&<div style={MOD} onClick={e=>e.target===e.currentTarget&&(setShowCM(false),setEC(null))}>
+  <div style={{...MBX,maxWidth:"680px"}} className="modal-anim">
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"20px"}}>
+      <h3 style={{fontFamily:OF,color:C.cyan,margin:0,fontSize:"16px",letterSpacing:"2px"}}>⚡ CHALLENGE MANAGER</h3>
+      <button onClick={()=>{setShowCM(false);setEC(null);}} style={{background:"rgba(239,68,68,0.15)",border:"1px solid rgba(239,68,68,0.4)",color:C.red,borderRadius:"7px",padding:"5px 12px",cursor:"pointer"}}>✕</button>
+    </div>
+    <div style={{display:"flex",flexDirection:"column",gap:"10px",maxHeight:"56vh",overflowY:"auto",marginBottom:"16px",paddingRight:"4px"}}>
+      {[...challenges].reverse().map(c=>{
+        const isActive=String(settings.active_challenge_id)===String(c.id);
+        const isEditing=editingChall?.id===c.id;
+        return(
+          <div key={c.id} style={{background:"rgba(255,255,255,0.03)",borderRadius:"10px",padding:"14px",border:"1px solid "+(isActive?C.cyan+"55":"rgba(255,255,255,0.08)")}}>
+            {isActive&&<div style={{fontSize:"10px",color:C.cyan,fontFamily:OF,marginBottom:"7px",letterSpacing:"2px"}}>✅ ACTIVE CHALLENGE</div>}
+            {isEditing?(
+              <div>
+                <textarea value={editingChall.prompt} onChange={e=>setEC({...editingChall,prompt:e.target.value})} style={{...INP,minHeight:"72px",resize:"vertical",marginBottom:"8px"}}/>
+                <div style={{display:"flex",gap:"6px",marginBottom:"10px",flexWrap:"wrap"}}>
+                  {["Easy","Medium","Hard","Extreme"].map(d=>(
+                    <button key={d} onClick={()=>setEC({...editingChall,difficulty:d})} style={{background:editingChall.difficulty===d?diffColor(d)+"22":"transparent",border:"1px solid "+(editingChall.difficulty===d?diffColor(d)+"66":"rgba(255,255,255,0.1)"),color:editingChall.difficulty===d?diffColor(d):C.muted,borderRadius:"6px",padding:"5px 10px",cursor:"pointer",fontSize:"11px"}}>{d}</button>
+                  ))}
+                </div>
+                <div style={{display:"flex",gap:"7px"}}>
+                  <button onClick={saveEditChallenge} style={{...PBTN,padding:"7px 16px",fontSize:"12px"}}>💾 Save</button>
+                  <button onClick={()=>setEC(null)} style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.15)",color:"#94a3b8",borderRadius:"7px",padding:"7px 14px",cursor:"pointer",fontSize:"12px"}}>Cancel</button>
+                </div>
+              </div>
+            ):(
+              <div>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:"6px"}}>
+                  <span style={{fontSize:"10px",color:diffColor(c.difficulty),fontFamily:OF,letterSpacing:"1px"}}>{c.difficulty}</span>
+                  <span style={{fontSize:"10px",color:C.muted}}>{new Date(c.created_at||Date.now()).toLocaleDateString()}</span>
+                </div>
+                <p style={{margin:"0 0 10px",fontSize:"13px",color:"#e2e8f0",fontStyle:"italic",lineHeight:"1.6"}}>"{c.prompt}"</p>
+                <div style={{display:"flex",gap:"6px",flexWrap:"wrap"}}>
+                  {!isActive&&<button onClick={()=>setActiveChallengeId(c.id)} style={{background:"rgba(0,229,255,0.1)",border:"1px solid rgba(0,229,255,0.4)",color:C.cyan,borderRadius:"6px",padding:"5px 10px",cursor:"pointer",fontSize:"11px"}}>✅ Set Active</button>}
+                  <button onClick={()=>setEC({id:c.id,prompt:c.prompt,difficulty:c.difficulty})} style={{background:"rgba(245,158,11,0.1)",border:"1px solid rgba(245,158,11,0.4)",color:C.gold,borderRadius:"6px",padding:"5px 10px",cursor:"pointer",fontSize:"11px"}}>✏️ Edit</button>
+                  {!isActive&&<button onClick={()=>deleteChallengeAction(c.id)} style={{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.4)",color:C.red,borderRadius:"6px",padding:"5px 10px",cursor:"pointer",fontSize:"11px"}}>🗑️ Delete</button>}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+    <button onClick={()=>{setShowCM(false);setSCE(true);}} style={{...PBTN,width:"100%"}}>+ Add New Challenge</button>
+  </div>
+</div>}
   {editIntroId&&<div style={MOD} onClick={e=>e.target===e.currentTarget&&setEI(null)}>
     <div style={{...MBX,maxWidth:"420px"}} className="modal-anim">
       <h3 style={{fontFamily:OF,color:C.cyan,textShadow:"0 0 12px "+C.cyan,textAlign:"center",marginBottom:"16px",fontSize:"15px",letterSpacing:"2px"}}>✏️ EDIT INTRO</h3>
@@ -926,7 +1175,37 @@ const row = {
       </div>
     </div>
   </div>}
-
+{showProfileEditor&&<div style={MOD} onClick={e=>e.target===e.currentTarget&&setSPE(null)}>
+  <div style={{...MBX,maxWidth:"400px"}} className="modal-anim">
+    {(()=>{
+      const c=getCousin(showProfileEditor);
+      return(<>
+        <h3 style={{fontFamily:OF,color:C.cyan,textAlign:"center",margin:"0 0 20px",fontSize:"15px",letterSpacing:"2px"}}>🖼️ EDIT PROFILE</h3>
+        <div style={{color:C.muted,fontSize:"11px",textAlign:"center",marginBottom:"14px"}}>{c?.name}</div>
+        <div style={{textAlign:"center",marginBottom:"20px"}}>
+          <div style={{position:"relative",display:"inline-block"}}>
+            <img src={profileImg||profiles[showProfileEditor]?.image_url||c?.img} alt="" style={{width:"90px",height:"90px",borderRadius:"50%",objectFit:"cover",border:"3px solid "+c?.color+"77",boxShadow:"0 0 20px "+c?.color+"44"}}/>
+            <button onClick={()=>profImgRef.current?.click()} style={{position:"absolute",bottom:0,right:0,background:c?.color||C.cyan,border:"none",borderRadius:"50%",width:"28px",height:"28px",cursor:"pointer",fontSize:"14px",display:"flex",alignItems:"center",justifyContent:"center"}}>📷</button>
+          </div>
+          <input ref={profImgRef} type="file" accept="image/*" onChange={handleProfileImgFile} style={{display:"none"}}/>
+          <div style={{marginTop:"7px",fontSize:"10px",color:C.muted}}>Click camera icon to upload new photo</div>
+        </div>
+        <div style={{marginBottom:"16px"}}>
+          <div style={{fontSize:"10px",color:C.muted,marginBottom:"8px",letterSpacing:"1px"}}>SELECT EMOJI</div>
+          <div style={{display:"flex",gap:"6px",flexWrap:"wrap"}}>
+            {["👑","🍗","🗳️","🤓","🏫","⛰️","🤫","🔥","⚡","🎯","🏆","💀","👊","🧠","😎","🦅","🐉","💎"].map(em=>(
+              <button key={em} onClick={()=>setPEmoji(em)} style={{background:profileEmoji===em?"rgba(0,229,255,0.2)":"rgba(255,255,255,0.05)",border:"1px solid "+(profileEmoji===em?"rgba(0,229,255,0.5)":"rgba(255,255,255,0.1)"),borderRadius:"7px",padding:"5px 9px",cursor:"pointer",fontSize:"18px"}}>{em}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{display:"flex",gap:"10px"}}>
+          <button className="pb" onClick={saveProfile} style={{...PBTN,flex:1}}>💾 SAVE PROFILE</button>
+          <button onClick={()=>setSPE(null)} style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.15)",color:"#94a3b8",borderRadius:"8px",padding:"11px 16px",cursor:"pointer"}}>CANCEL</button>
+        </div>
+      </>);
+    })()}
+  </div>
+</div>}
 </div>
   );
 }
