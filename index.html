@@ -134,10 +134,10 @@ img{image-rendering:auto;content-visibility:auto}
 // Production fix: proxy Groq calls through a serverless function (Supabase Edge Function / Vercel API route).
 // adminPass should use a real auth system. These are acceptable for a private family app.
 const CFG = {
-  groqKey: "",
+  groqKey: "YOUR_GROQ_API_KEY_HERE",
   adminPass: "",
   supabaseUrl: "https://rsrfmtcltppmslqmhiqe.supabase.co",
-  supabaseAnon: "",
+  supabaseAnon: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJzcmZtdGNsdHBwbXNscW1oaXFlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3ODM4MTEsImV4cCI6MjA5NDM1OTgxMX0.CDSsgnKGv-XMvKAEC638vars9Aua4idabC_dy0pDqhs",
   cloudinaryCloud: "dinyg5ryl",
   cloudinaryPreset: "qazi_league",
 };
@@ -157,7 +157,22 @@ function adminLogout() {
 }
 
 // ===== SUPABASE CLIENT =====
-const sb = supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnon);
+// Guard: supabaseAnon must be a non-empty string or createClient throws immediately
+const sb = CFG.supabaseAnon
+  ? supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnon)
+  : null;
+
+// Warn in console if credentials are missing so the developer knows what to fill in
+if (!CFG.supabaseAnon) {
+  console.warn(
+    "[Qazi League] CFG.supabaseAnon is empty — database features are disabled until you paste your Supabase anon key into CFG."
+  );
+}
+if (!CFG.groqKey) {
+  console.warn(
+    "[Qazi League] CFG.groqKey is empty — AI judging is disabled until you paste your Groq API key into CFG."
+  );
+}
 
 // ===== PROFILE IMAGES (embedded, never change) =====
 const IMGS = {
@@ -229,20 +244,27 @@ function clUrl(url,opts="w_400,h_400,c_fill"){
 }
 
 // ===== DB FUNCTIONS =====
+function requireSb(){
+  if(!sb) throw new Error("Supabase is not configured. Please add your supabaseAnon key to CFG.");
+}
 async function dbFetchSubmissions(){
+  requireSb();
   const{data,error}=await sb.from("qazi_submissions").select("*").order("created_at",{ascending:true});
   if(error)throw error; return data||[];
 }
 async function dbFetchChallenges(){
+  requireSb();
   const{data,error}=await sb.from("qazi_challenges").select("*").order("created_at",{ascending:true});
   if(error)throw error; return data||[];
 }
 async function dbFetchIntros(){
+  requireSb();
   const{data,error}=await sb.from("qazi_intros").select("*");
   if(error)throw error;
   const map={};(data||[]).forEach(r=>{map[r.cousin_id]=r.intro;});return map;
 }
 async function dbInsertSubmission(row){
+  requireSb();
   const{data,error}=await sb.from("qazi_submissions").insert(row).select().single();
   if(error)throw error; return data;
 }
@@ -292,6 +314,7 @@ function getChallengePayloadVariants(row){
 }
 
 async function dbInsertChallenge(row){
+  requireSb();
   const variants = getChallengePayloadVariants(row);
   let lastError;
   for(const payload of variants){
@@ -303,6 +326,7 @@ async function dbInsertChallenge(row){
   throw lastError;
 }
 async function dbUpdateChallenge(id,row){
+  requireSb();
   const variants = getChallengePayloadVariants(row);
   let lastError;
   for(const payload of variants){
@@ -314,30 +338,37 @@ async function dbUpdateChallenge(id,row){
   throw lastError;
 }
 async function dbDeleteChallenge(id){
+  requireSb();
   const{error}=await sb.from("qazi_challenges").delete().eq("id",id);
   if(error)throw error;
 }
 async function dbFetchProfiles(){
+  requireSb();
   const{data,error}=await sb.from("qazi_profiles").select("*");
   if(error){console.warn("qazi_profiles table missing or unavailable",error);return [];} return data||[];
 }
 async function dbUpsertProfile(row){
+  requireSb();
   const{data,error}=await sb.from("qazi_profiles").upsert(row).select();
   if(error)throw error; return data;
 }
 async function dbUpsertIntro(cousin_id,intro){
+  requireSb();
   const{error}=await sb.from("qazi_intros").upsert({cousin_id,intro,updated_at:new Date().toISOString()});
   if(error)throw error;
 }
 async function dbFetchHof(){
+  requireSb();
   const{data,error}=await sb.from("qazi_hof").select("*").order("created_at",{ascending:false});
   if(error){console.warn("qazi_hof table missing or unavailable",error);return [];} return data||[];
 }
 async function dbUpsertHof(row){
+  requireSb();
   const{data,error}=await sb.from("qazi_hof").upsert(row).select();
   if(error)throw error; return data;
 }
 async function dbDeleteSubmission(id){
+  requireSb();
   const{error}=await sb.from("qazi_submissions").delete().eq("id",id);
   if(error)throw error;
 }
@@ -433,6 +464,15 @@ Return ONLY this JSON. No other text. No markdown. No backticks:
 </script>
 
 <script>
+// ===== DEFAULT CHALLENGE (fallback placeholder used before DB data loads) =====
+const DEFAULT_CHALL = {
+  id: 0,
+  prompt: "No active challenge — admin can add one from the Challenges tab.",
+  difficulty: "Medium",
+  start_date: new Date(0).toISOString(),
+  end_date: new Date("2099-12-31").toISOString(),
+};
+
 const Calendar = {
   now() {
     return new Date();
@@ -1602,6 +1642,16 @@ function App(){
 }
 const root=ReactDOM.createRoot(document.getElementById("root"));
 root.render(React.createElement(App));
+</script>
+// ===== FILE:// ORIGIN WARNING =====
+(function(){
+  if(location.protocol==="file:"){
+    const banner=document.createElement("div");
+    banner.style.cssText="position:fixed;bottom:0;left:0;right:0;z-index:99999;background:#7c3aed;color:#fff;font-family:monospace;font-size:12px;padding:8px 14px;text-align:center;";
+    banner.innerHTML="⚠️ <b>Opened as file://</b> — localStorage and some features won't work. Serve via a local server instead: <code>python -m http.server 8080</code> or use VS Code Live Server, then open <b>http://localhost:8080</b>.";
+    document.body.appendChild(banner);
+  }
+})();
 </script>
 </body>
 </html>
