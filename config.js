@@ -1,6 +1,4 @@
 const CFG = {
-  // Paste your real Groq API key here (from https://console.groq.com/keys).
-  // Do NOT paste GitHub tokens (ghp_...) or other provider keys.
   groqKey: "GROQ_KEY_PLACEHOLDER",
   adminPass: "",
   supabaseUrl: "https://rsrfmtcltppmslqmhiqe.supabase.co",
