@@ -132,6 +132,27 @@ img{image-rendering:auto;content-visibility:auto}
 <script>
 // ===== CONFIG =====
 // CFG is loaded from config.js (gitignored — never commit that file).
+const GROQ_KEY_STORAGE_KEY = "qazi_groq_key";
+function getGroqKey(){
+  const fromCfg = typeof CFG?.groqKey === "string" ? CFG.groqKey.trim() : "";
+  if (fromCfg && fromCfg !== "GROQ_KEY_PLACEHOLDER") return fromCfg;
+  try {
+    const fromStorage = (localStorage.getItem(GROQ_KEY_STORAGE_KEY) || "").trim();
+    if (fromStorage) return fromStorage;
+  } catch (_) {}
+  return "";
+}
+
+function validateGroqKey(rawKey){
+  const key = (rawKey || "").trim();
+  if (!key || key === "GROQ_KEY_PLACEHOLDER") {
+    throw new Error("Groq API key missing. Put a real key in config.js -> CFG.groqKey.");
+  }
+  if (key.startsWith("ghp_")) {
+    throw new Error("This looks like a GitHub token (ghp_), not a Groq API key. Use a Groq key from console.groq.com.");
+  }
+  return key;
+}
 
 // ===== PERSISTENT ADMIN AUTH =====
 const ADMIN_TOKEN_KEY = "qazi_admin_token";
@@ -159,9 +180,9 @@ if (!CFG.supabaseAnon) {
     "[Qazi League] CFG.supabaseAnon is empty — database features are disabled until you paste your Supabase anon key into CFG."
   );
 }
-if (!CFG.groqKey) {
+if (!getGroqKey()) {
   console.warn(
-    "[Qazi League] CFG.groqKey is empty — AI judging is disabled until you paste your Groq API key into CFG."
+    "[Qazi League] Groq key is empty or placeholder — AI judging is disabled until you paste a real Groq key into CFG.groqKey."
   );
 }
 
@@ -377,6 +398,7 @@ async function uploadToCloudinary(file){
 
 // ===== GROQ AI JUDGE =====
 async function callGroqJudge(base64Data,mimeType,challengePrompt,refB64,refMime){
+  const groqKey = validateGroqKey(getGroqKey());
   const hasRef=refB64&&refMime;
   const prompt = `You are a strict, calibrated AI judge for an image generation competition called the Qazi Family League. Your job is to score a submitted image against a specific task prompt. You must give differentiated, honest scores. Do NOT give everyone similar scores.
 
@@ -444,10 +466,18 @@ Return ONLY this JSON. No other text. No markdown. No backticks:
 
   const resp=await fetch("https://api.groq.com/openai/v1/chat/completions",{
     method:"POST",
-    headers:{"Authorization":"Bearer "+CFG.groqKey,"Content-Type":"application/json"},
+    headers:{"Authorization":"Bearer "+groqKey,"Content-Type":"application/json"},
     body:JSON.stringify({model:"meta-llama/llama-4-scout-17b-16e-instruct",messages:[{role:"user",content:contentArr}],max_tokens:1400,temperature:0.2})
   });
-  if(!resp.ok){const e=await resp.json();throw new Error(e.error?.message||"Groq error "+resp.status);}
+  if(!resp.ok){
+    let e={};
+    try{e=await resp.json();}catch(_){}
+    const msg=e.error?.message||"Groq error "+resp.status;
+    if(resp.status===401||/invalid api key/i.test(msg)){
+      throw new Error("Groq rejected the API key. Confirm CFG.groqKey contains a valid Groq key (not GitHub/Supabase token).");
+    }
+    throw new Error(msg);
+  }
   const data=await resp.json();
   return JSON.parse((data.choices?.[0]?.message?.content||"").replace(/```json|```/g,"").trim());
 }
